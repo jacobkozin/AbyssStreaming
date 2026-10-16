@@ -1,0 +1,74 @@
+# CMake and build outputs
+/build/
+/build-*/
+/cmake-build-*/
+/out/
+/dist/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+Makefile
+*.ninja
+.ninja_*
+compile_commands.json
+
+# Compiled binaries and generated Qt files
+*.exe
+*.dll
+*.lib
+*.exp
+*.obj
+*.o
+*.pdb
+*.ilk
+*.a
+*.so
+*.dylib
+*_autogen/
+*.moc
+moc_*.cpp
+qrc_*.cpp
+ui_*.h
+
+# Downloaded dependencies and local runtime state
+/.deps/
+*.log
+*.dmp
+last_exe.txt
+last_obs_root.txt
+last_qt_root.txt
+AbyssStream-obs.log
+
+# IDE and editor state
+/.vs/
+/.vscode/
+/.idea/
+*.suo
+*.user
+*.user.*
+CMakeUserPresets.json
+
+# Secrets, local configuration, and private data
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12
+*.jks
+*.keystore
+*.db
+*.sqlite
+*.sqlite3
+
+# Operating-system and temporary files
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.tmp
+*.temp
+*.bak
+*.swp
+*~
