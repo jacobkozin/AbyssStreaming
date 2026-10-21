@@ -25,6 +25,13 @@ struct CaptureChoice {
     bool integerValue{false};
 };
 
+// Display capture methods. Apart from Abyss Auto these are win-capture's own
+// "method" values, which the scene file stores as they are.
+constexpr int kDisplayMethodAbyssAuto = -1; // WGC first, DXGI if WGC shows nothing; never forces SDR
+constexpr int kDisplayMethodObsAuto = 0;
+constexpr int kDisplayMethodDxgi = 1; // DXGI Desktop Duplication
+constexpr int kDisplayMethodWgc = 2;  // Windows Graphics Capture
+
 // Everything the add/edit dialogs can change. Each kind only reads the fields
 // that apply to it.
 struct SourceRequest {
@@ -36,9 +43,8 @@ struct SourceRequest {
     CaptureChoice choice;
     bool captureCursor{true};
     bool gameAnyFullscreen{true};
-    // Display capture only. -1 = Abyss Auto (HDR-aware), 0 = OBS Automatic,
-    // 1 = Windows Graphics Capture, 2 = DXGI Desktop Duplication.
-    int displayMethod{-1};
+    // Display capture only: one of the kDisplayMethod values above.
+    int displayMethod{kDisplayMethodAbyssAuto};
     // Keep false for native HDR capture. This is exposed only as a compatibility
     // option; Abyss Auto never forces SDR.
     bool forceSdr{false};

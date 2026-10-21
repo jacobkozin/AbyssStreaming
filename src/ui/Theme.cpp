@@ -2,12 +2,65 @@
 
 #include <QApplication>
 #include <QColor>
+#include <QPainter>
 #include <QPalette>
+#include <QProxyStyle>
 #include <QStyleFactory>
+#include <QStyleOption>
+#include <algorithm>
 
 namespace abyss::theme {
 
 namespace {
+
+// Fusion draws a check box border from the window color, which is black on
+// this dark theme, so an unchecked box was invisible. This draws the box
+// itself; list items with check boxes (the sources list) use it too.
+class AbyssStyle : public QProxyStyle {
+public:
+    AbyssStyle() : QProxyStyle(QStyleFactory::create("Fusion")) {}
+
+    void drawPrimitive(PrimitiveElement element, const QStyleOption *option, QPainter *painter,
+                       const QWidget *widget) const override
+    {
+        if (element != PE_IndicatorCheckBox) {
+            QProxyStyle::drawPrimitive(element, option, painter, widget);
+            return;
+        }
+
+        const bool enabled = option->state & State_Enabled;
+        const bool on = option->state & State_On;
+        const bool partial = option->state & State_NoChange;
+        QColor border(enabled && (option->state & State_MouseOver) ? "#8190b3" : "#5a6684");
+        QColor fill("#090c12");
+        if (on || partial)
+            border = fill = QColor(kAccent);
+        if (!enabled) {
+            border = QColor("#2c3448");
+            fill = QColor(on || partial ? "#3a4470" : "#0d1018");
+        }
+
+        painter->save();
+        painter->setRenderHint(QPainter::Antialiasing, true);
+        const QRectF box = QRectF(option->rect).adjusted(0.5, 0.5, -0.5, -0.5);
+        painter->setPen(QPen(border, 1.0));
+        painter->setBrush(fill);
+        painter->drawRoundedRect(box, 3.0, 3.0);
+
+        QPen mark(Qt::white, std::max(1.5, box.width() / 8.0), Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+        painter->setPen(mark);
+        const auto at = [&box](qreal x, qreal y) {
+            return QPointF(box.left() + box.width() * x, box.top() + box.height() * y);
+        };
+        if (on) {
+            const QPointF check[] = {at(0.25, 0.52), at(0.43, 0.70), at(0.76, 0.32)};
+            painter->drawPolyline(check, 3);
+        } else if (partial) {
+            painter->drawLine(at(0.28, 0.5), at(0.72, 0.5));
+        }
+        painter->restore();
+    }
+};
 
 const char *kStyleSheet = R"(
     QWidget { font-family: "Segoe UI"; font-size: 10pt; }
@@ -52,7 +105,7 @@ const char *kStyleSheet = R"(
 
 void apply(QApplication &app)
 {
-    app.setStyle(QStyleFactory::create("Fusion"));
+    app.setStyle(new AbyssStyle); // QApplication takes ownership
 
     QPalette palette;
     const QColor window("#090b10");

@@ -45,6 +45,34 @@ extern "C" __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
 
 namespace {
 
+#ifdef _WIN32
+// Brings the running instance's main window to the front; false if it has none.
+bool activateRunningInstance(qint64 pid)
+{
+    struct Search {
+        DWORD pid;
+        HWND window;
+    } search{static_cast<DWORD>(pid), nullptr};
+    EnumWindows(
+        [](HWND window, LPARAM param) -> BOOL {
+            auto *s = reinterpret_cast<Search *>(param);
+            DWORD owner = 0;
+            GetWindowThreadProcessId(window, &owner);
+            if (owner != s->pid || !IsWindowVisible(window) || GetWindow(window, GW_OWNER))
+                return TRUE; // keep looking
+            s->window = window;
+            return FALSE;
+        },
+        reinterpret_cast<LPARAM>(&search));
+    if (!search.window)
+        return false;
+    if (IsIconic(search.window))
+        ShowWindow(search.window, SW_RESTORE);
+    SetForegroundWindow(search.window);
+    return true;
+}
+#endif
+
 #ifdef ABYSS_WITH_OBS
 std::atomic<bool> g_eventLoopFinished{false};
 
@@ -118,6 +146,11 @@ int main(int argc, char **argv)
     QLockFile instanceLock(QDir(dataDirectory).filePath("instance.lock"));
     instanceLock.setStaleLockTime(0);
     if (!instanceLock.tryLock(100)) {
+#ifdef _WIN32
+        qint64 runningPid = 0;
+        if (instanceLock.getLockInfo(&runningPid, nullptr, nullptr) && activateRunningInstance(runningPid))
+            return 0;
+#endif
         QMessageBox::information(nullptr, "Abyss Stream", "Abyss Stream is already running.");
         return 0;
     }

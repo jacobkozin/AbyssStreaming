@@ -87,9 +87,13 @@ if(ABYSS_WITH_OBS)
         src/obs/ObsRecordingBackend.cpp
         src/obs/ObsSceneBackend.cpp
         src/obs/ObsStreamBackend.cpp
+        src/platform/HdrMonitor.cpp
     )
     target_compile_definitions(abyss_stream_obs PUBLIC ABYSS_WITH_OBS=1)
     target_link_libraries(abyss_stream_obs PUBLIC abyss_stream_core abyss_stream_net OBS::libobs)
+    if(WIN32)
+        target_link_libraries(abyss_stream_obs PUBLIC user32)
+    endif()
 
     # Headless end-to-end test of the real pipeline. Not part of ctest: it
     # needs the OBS runtime and local RTMP servers (tools/run_e2e_test.ps1).

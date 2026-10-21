@@ -11,7 +11,7 @@
 - Settings, destinations, scenes and window layout persist across restarts (`%LOCALAPPDATA%\Abyss\Abyss Stream`).
 - Image, color, text and video capture device (webcam) sources; scene rename; source reordering; layout presets (fit, stretch, center, corners, size).
 - Video settings dialog: canvas and output resolution, FPS, bitrate, hardware or software encoder.
-- Crash minidumps, timestamped log lines and the previous run's log kept as `.prev.log`; single-instance lock.
+- Crash minidumps, timestamped log lines and the previous run's log kept as `.prev.log`; single-instance lock (starting Abyss Stream again brings the open window to the front).
 - Local RTMP test server (`tools/rtmp_test_server.py`) and a headless end-to-end pipeline test (`tools/run_e2e_test.ps1`).
 
 ### Fixed
@@ -21,6 +21,11 @@
 - A spurious "UI task could not be queued" error at shutdown, caused by removing the UI task handler (which itself queues a task).
 - Unit tests used `assert()`, which compiles to nothing in Release builds, so the "passing" tests checked nothing. They now use a small harness that always runs, and CTest requires its summary line.
 - Source files with typographic dashes are compiled as UTF-8 (`/utf-8`) instead of the system code page.
+- With Windows HDR turned on, the preview was solid black. On an HDR monitor libobs scales the preview by the SDR white level, which stays at zero until the app sets it. Abyss Stream now uses the "SDR content brightness" Windows uses on the HDR monitor (OBS Studio's 300-nit default when no monitor has HDR on). So the preview matches other SDR windows, and a captured HDR desktop is tone-mapped from the brightness the user actually sees. Before, that tone mapping divided by zero.
+- The display capture method numbers were swapped (win-capture uses 1 for DXGI and 2 for WGC). So "Abyss Auto" started with DXGI instead of Windows Graphics Capture, and choosing WGC or DXGI by hand gave the other one. The values are now defined once in `core/SceneBackend.hpp`.
+- The HDR check on a new display capture read its color space outside the graphics context, so it always reported SDR.
+- Unchecked check boxes were invisible on the dark theme, including each destination's "include in Go Live" box.
+- The corner layouts (top left and so on) scaled a source up to fill a box nearly the size of the canvas, so a line of text became huge. Corners now keep a source's own size and only shrink it to fit, and the Size menu reads "Max size" there.
 
 ## 0.3.0 R9 — 2026-09-29
 

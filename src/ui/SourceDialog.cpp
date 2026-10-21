@@ -65,10 +65,10 @@ SourceDialog::SourceDialog(ISceneBackend &scenes, SourceKind kind, const SourceR
 
     if (kind == SourceKind::Display) {
         displayMethod_ = new QComboBox(this);
-        displayMethod_->addItem("Abyss Auto (HDR-aware)", -1);
-        displayMethod_->addItem("OBS Automatic", 0);
-        displayMethod_->addItem("Windows Graphics Capture (WGC)", 1);
-        displayMethod_->addItem("DXGI Desktop Duplication", 2);
+        displayMethod_->addItem("Abyss Auto (HDR-aware)", kDisplayMethodAbyssAuto);
+        displayMethod_->addItem("OBS Automatic", kDisplayMethodObsAuto);
+        displayMethod_->addItem("Windows Graphics Capture (WGC)", kDisplayMethodWgc);
+        displayMethod_->addItem("DXGI Desktop Duplication", kDisplayMethodDxgi);
         const int index = displayMethod_->findData(request_.displayMethod);
         displayMethod_->setCurrentIndex(index >= 0 ? index : 0);
         form->addRow("Capture method", displayMethod_);
@@ -188,7 +188,7 @@ void SourceDialog::updateHdrControls()
 {
     if (!displayMethod_ || !forceSdr_)
         return;
-    const bool abyssAuto = displayMethod_->currentData().toInt() == -1;
+    const bool abyssAuto = displayMethod_->currentData().toInt() == kDisplayMethodAbyssAuto;
     forceSdr_->setEnabled(!abyssAuto);
     if (abyssAuto)
         forceSdr_->setChecked(false);

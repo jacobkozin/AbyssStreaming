@@ -3,6 +3,7 @@
 #include "core/LogRedactor.hpp"
 #include "core/PathUtf8.hpp"
 #include "obs/ObsNativeRtmpOutput.hpp"
+#include "platform/HdrMonitor.hpp"
 
 #include <array>
 #include <chrono>
@@ -29,6 +30,13 @@ namespace {
 constexpr std::array<const char *, 2> kHardwareVideoEncoders{"obs_nvenc_h264_tex", "h264_texture_amf"};
 constexpr const char *kSoftwareVideoEncoder = "obs_x264";
 constexpr std::array<const char *, 3> kAudioEncoders{"CoreAudio_AAC", "libfdk_aac", "ffmpeg_aac"};
+
+// libobs leaves these at zero until they are set. The preview on an HDR
+// monitor and the tone mapping of HDR display capture are scaled by them, so
+// zero means a black picture. These are OBS Studio's defaults; the SDR white
+// level is taken from Windows instead whenever a monitor has HDR on.
+constexpr float kDefaultSdrWhiteLevelNits = 300.0f;
+constexpr float kHdrNominalPeakLevelNits = 1000.0f;
 
 std::string normalizeObsPath(std::string path)
 {
@@ -369,6 +377,14 @@ bool ObsEngine::resetVideo(const VideoSettings &settings, std::string &error)
         blog(LOG_ERROR, "obs_reset_video failed with code %d", code);
         return false;
     }
+    // Matching Windows' "SDR content brightness" makes the preview look like
+    // every other SDR window on an HDR monitor, and maps a captured HDR
+    // desktop back to the brightness the user sees.
+    const auto windowsSdrWhite = hdrMonitorSdrWhiteNits();
+    const float sdrWhite = windowsSdrWhite.value_or(kDefaultSdrWhiteLevelNits);
+    obs_set_video_levels(sdrWhite, kHdrNominalPeakLevelNits);
+    blog(LOG_INFO, "SDR white level: %.0f nits (%s)", sdrWhite,
+         windowsSdrWhite ? "from the HDR monitor's Windows setting" : "no HDR monitor, OBS default");
     return true;
 }
 

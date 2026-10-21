@@ -13,9 +13,6 @@ namespace abyss {
 
 namespace {
 
-constexpr int kAbyssHdrAutoMethod = -1;
-constexpr int kObsMethodWgc = 1;
-constexpr int kObsMethodDxgi = 2;
 constexpr const char *kAbyssHdrAutoKey = "abyss_hdr_auto";
 constexpr const char *kPlacementKey = "abyss_placement";
 constexpr const char *kScaleKey = "abyss_scale";
@@ -336,13 +333,13 @@ void ObsSceneBackend::writeSettings(obs_data_t *settings, const SourceRequest &r
 {
     switch (request.kind) {
     case SourceKind::Display: {
-        const bool abyssAuto = request.displayMethod == kAbyssHdrAutoMethod;
+        const bool abyssAuto = request.displayMethod == kDisplayMethodAbyssAuto;
         // HDR-aware default: WGC handles modern HDR desktops without asking
         // the user to turn Windows HDR off. If WGC never produces a frame,
         // autoTuneDisplayCapture() falls back to DXGI.
         obs_data_set_bool(settings, "capture_cursor", request.captureCursor);
         obs_data_set_bool(settings, kAbyssHdrAutoKey, abyssAuto);
-        obs_data_set_int(settings, "method", abyssAuto ? kObsMethodWgc : request.displayMethod);
+        obs_data_set_int(settings, "method", abyssAuto ? kDisplayMethodWgc : request.displayMethod);
         obs_data_set_bool(settings, "force_sdr", abyssAuto ? false : request.forceSdr);
         break;
     }
@@ -451,7 +448,8 @@ SceneOperationResult ObsSceneBackend::getSource(const std::string &name, SourceR
     switch (kind) {
     case SourceKind::Display: {
         const bool abyssAuto = obs_data_get_bool(settings, kAbyssHdrAutoKey);
-        request.displayMethod = abyssAuto ? kAbyssHdrAutoMethod : static_cast<int>(obs_data_get_int(settings, "method"));
+        request.displayMethod =
+            abyssAuto ? kDisplayMethodAbyssAuto : static_cast<int>(obs_data_get_int(settings, "method"));
         request.forceSdr = obs_data_get_bool(settings, "force_sdr");
         break;
     }
@@ -560,8 +558,12 @@ SceneOperationResult ObsSceneBackend::autoTuneDisplayCapture(const std::string &
     const auto height = obs_source_get_height(source);
     const int method = static_cast<int>(obs_data_get_int(settings, "method"));
 
+    // DXGI capture asks the graphics device for its color space, which is
+    // only allowed inside the graphics context.
     const enum gs_color_space preferred[] = {GS_CS_709_SCRGB, GS_CS_709_EXTENDED, GS_CS_SRGB_16F, GS_CS_SRGB};
+    obs_enter_graphics();
     const auto sourceSpace = obs_source_get_color_space(source, sizeof(preferred) / sizeof(preferred[0]), preferred);
+    obs_leave_graphics();
 
     // Pass 1 is diagnostic: WGC is already the HDR-aware default, so log what
     // OBS reports to confirm the native capture path was kept.
@@ -574,10 +576,10 @@ SceneOperationResult ObsSceneBackend::autoTuneDisplayCapture(const std::string &
 
     // If WGC never produced a frame size, fall back to DXGI. This keeps the
     // default zero-touch while still preserving HDR (force_sdr stays false).
-    if ((width == 0 || height == 0) && method == kObsMethodWgc) {
+    if ((width == 0 || height == 0) && method == kDisplayMethodWgc) {
         blog(LOG_WARNING, "Abyss HDR-aware display capture produced no frame through WGC; falling back to DXGI: %s",
              name.c_str());
-        obs_data_set_int(settings, "method", kObsMethodDxgi);
+        obs_data_set_int(settings, "method", kDisplayMethodDxgi);
         obs_data_set_bool(settings, "force_sdr", false);
         obs_source_update(source, settings);
         applyLayout(item, readLayout(item));
@@ -686,9 +688,17 @@ void ObsSceneBackend::applyLayout(obs_sceneitem_t *item, const SourceLayout &lay
     pos.x = canvasW * 0.5f;
     pos.y = canvasH * 0.5f;
 
-    // Corner placements keep a small margin so overlays do not touch the edge.
-    const float cornerW = (canvasW - 2.0f * margin) * scale;
-    const float cornerH = (canvasH - 2.0f * margin) * scale;
+    // Corner placements keep a small margin so overlays do not touch the
+    // edge. They keep a source's own size and only shrink it to fit the
+    // corner box, so text or a logo is never blown up.
+    const auto corner = [&](std::uint32_t cornerAlignment, float x, float y) {
+        alignment = cornerAlignment;
+        boundsType = OBS_BOUNDS_MAX_ONLY;
+        pos.x = x;
+        pos.y = y;
+        bounds.x = (canvasW - 2.0f * margin) * scale;
+        bounds.y = (canvasH - 2.0f * margin) * scale;
+    };
     switch (layout.placement) {
     case SourcePlacement::Fit: break;
     case SourcePlacement::Stretch:
@@ -697,33 +707,11 @@ void ObsSceneBackend::applyLayout(obs_sceneitem_t *item, const SourceLayout &lay
         bounds.y = canvasH;
         break;
     case SourcePlacement::Center: boundsType = OBS_BOUNDS_NONE; break;
-    case SourcePlacement::TopLeft:
-        alignment = OBS_ALIGN_TOP | OBS_ALIGN_LEFT;
-        pos.x = margin;
-        pos.y = margin;
-        bounds.x = cornerW;
-        bounds.y = cornerH;
-        break;
-    case SourcePlacement::TopRight:
-        alignment = OBS_ALIGN_TOP | OBS_ALIGN_RIGHT;
-        pos.x = canvasW - margin;
-        pos.y = margin;
-        bounds.x = cornerW;
-        bounds.y = cornerH;
-        break;
-    case SourcePlacement::BottomLeft:
-        alignment = OBS_ALIGN_BOTTOM | OBS_ALIGN_LEFT;
-        pos.x = margin;
-        pos.y = canvasH - margin;
-        bounds.x = cornerW;
-        bounds.y = cornerH;
-        break;
+    case SourcePlacement::TopLeft: corner(OBS_ALIGN_TOP | OBS_ALIGN_LEFT, margin, margin); break;
+    case SourcePlacement::TopRight: corner(OBS_ALIGN_TOP | OBS_ALIGN_RIGHT, canvasW - margin, margin); break;
+    case SourcePlacement::BottomLeft: corner(OBS_ALIGN_BOTTOM | OBS_ALIGN_LEFT, margin, canvasH - margin); break;
     case SourcePlacement::BottomRight:
-        alignment = OBS_ALIGN_BOTTOM | OBS_ALIGN_RIGHT;
-        pos.x = canvasW - margin;
-        pos.y = canvasH - margin;
-        bounds.x = cornerW;
-        bounds.y = cornerH;
+        corner(OBS_ALIGN_BOTTOM | OBS_ALIGN_RIGHT, canvasW - margin, canvasH - margin);
         break;
     }
 

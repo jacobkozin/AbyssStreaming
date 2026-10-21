@@ -438,7 +438,7 @@ void MainWindow::addSource(SourceKind kind)
         return;
     }
     rebuildSources(q(result.createdName));
-    if (kind == SourceKind::Display && request.displayMethod == -1)
+    if (kind == SourceKind::Display && request.displayMethod == kDisplayMethodAbyssAuto)
         scheduleDisplayAutoTune(result.createdName);
     scheduleSceneSave();
 }
@@ -465,7 +465,7 @@ void MainWindow::editSource()
         return;
     }
     rebuildSources(q(updated.createdName));
-    if (edited.kind == SourceKind::Display && edited.displayMethod == -1)
+    if (edited.kind == SourceKind::Display && edited.displayMethod == kDisplayMethodAbyssAuto)
         scheduleDisplayAutoTune(updated.createdName);
     scheduleSceneSave();
 }
@@ -527,7 +527,10 @@ void MainWindow::showSourceMenu(const QPoint &pos)
         action->setChecked(layout.placement == value);
     }
 
-    QMenu *size = menu.addMenu("Size");
+    // In a corner the size is a limit: a smaller source keeps its own size.
+    const bool inCorner = layout.placement != SourcePlacement::Fit && layout.placement != SourcePlacement::Stretch &&
+                          layout.placement != SourcePlacement::Center;
+    QMenu *size = menu.addMenu(inCorner ? "Max size" : "Size");
     size->setEnabled(layout.placement != SourcePlacement::Stretch && layout.placement != SourcePlacement::Center);
     for (int percent : {100, 75, 50, 33, 25, 15}) {
         auto *action = size->addAction(QString("%1% of canvas").arg(percent), this,
