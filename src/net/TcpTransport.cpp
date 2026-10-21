@@ -57,6 +57,7 @@ std::string socketErrorText(int code)
     case WSAECONNREFUSED: return "connection refused (is the server running and the port right?)";
     case WSAETIMEDOUT: return "timed out";
     case WSAECONNRESET: return "connection reset by the server";
+    case WSAECONNABORTED: return "the connection was closed";
     case WSAENETUNREACH:
     case WSAEHOSTUNREACH: return "network unreachable";
     default: return "socket error " + std::to_string(code);

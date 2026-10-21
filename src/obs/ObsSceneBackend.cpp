@@ -854,8 +854,13 @@ void ObsSceneBackend::releaseAll()
 {
     if (!scenes_.empty())
         obs_set_output_source(0, nullptr);
-    for (auto &[_, scene] : scenes_)
+    // libobs 31+ also keeps every scene in the main canvas. Removing it from
+    // the canvas before dropping our reference frees it now, instead of
+    // leaving obs_shutdown() to destroy it a second time.
+    for (auto &[_, scene] : scenes_) {
+        obs_source_remove(obs_scene_get_source(scene));
         obs_scene_release(scene);
+    }
     scenes_.clear();
     order_.clear();
     current_.clear();

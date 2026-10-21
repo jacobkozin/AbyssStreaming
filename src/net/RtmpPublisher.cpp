@@ -49,6 +49,18 @@ void RtmpPublisher::push(EncodedPacket packet)
     wake_.notify_one();
 }
 
+void RtmpPublisher::setVideoParameterSets(AvcParameterSets sets)
+{
+    std::scoped_lock lock(mutex_);
+    headers_.parameterSets = std::move(sets);
+}
+
+void RtmpPublisher::setAudioSpecificConfig(Bytes config)
+{
+    std::scoped_lock lock(mutex_);
+    headers_.audioSpecificConfig = std::move(config);
+}
+
 void RtmpPublisher::stop()
 {
     {
@@ -87,26 +99,43 @@ void RtmpPublisher::dropForCongestion()
     queue_ = std::move(kept);
 }
 
-bool RtmpPublisher::sendHeaders(RtmpSession &session, std::string &error)
+bool RtmpPublisher::sendHeaders(RtmpSession &session, const PublisherHeaders &headers, std::string &error)
 {
-    if (!session.sendMetadata(headers_.metadata, error))
+    if (!session.sendMetadata(headers.metadata, error))
         return false;
-    const Bytes avcConfig = buildAvcDecoderConfig(headers_.parameterSets);
+    const Bytes avcConfig = buildAvcDecoderConfig(headers.parameterSets);
     if (!session.sendVideo(0, view(flvAvcSequenceHeader(view(avcConfig))), error))
         return false;
-    if (!headers_.audioSpecificConfig.empty() &&
-        !session.sendAudio(0, view(flvAacSequenceHeader(view(headers_.audioSpecificConfig))), error))
-        return false;
+    if (!headers.audioSpecificConfig.empty()) {
+        if (!session.sendAudio(0, view(flvAacSequenceHeader(view(headers.audioSpecificConfig))), error))
+            return false;
+        audioHeaderSent_ = true;
+    }
     return true;
 }
 
 bool RtmpPublisher::sendPacket(RtmpSession &session, const EncodedPacket &packet, std::string &error)
 {
     if (packet.kind == EncodedPacket::Kind::Video) {
-        // Viewers can only start decoding at a keyframe, so the stream does too.
+        // Viewers can only start decoding at a keyframe, so the stream does
+        // too, right after the codec headers.
         if (!started_) {
             if (!packet.keyframe)
                 return true;
+            PublisherHeaders headers;
+            {
+                std::scoped_lock lock(mutex_);
+                headers = headers_;
+            }
+            if (headers.parameterSets.sps.empty()) {
+                // Some encoders repeat SPS/PPS inside every keyframe.
+                if (auto sets = findParameterSets(view(packet.data)))
+                    headers.parameterSets = std::move(*sets);
+                else
+                    return true; // no headers yet; wait for a later keyframe
+            }
+            if (!sendHeaders(session, headers, error))
+                return false;
             started_ = true;
             baseUsec_ = packet.dtsUsec;
         }
@@ -117,6 +146,21 @@ bool RtmpPublisher::sendPacket(RtmpSession &session, const EncodedPacket &packet
     }
     if (!started_ || packet.dtsUsec < baseUsec_)
         return true; // audio from before the first keyframe
+    if (!audioHeaderSent_) {
+        // The AAC config arrived after video started; a player needs it
+        // before the first audio frame.
+        Bytes config;
+        {
+            std::scoped_lock lock(mutex_);
+            config = headers_.audioSpecificConfig;
+        }
+        if (config.empty())
+            return true; // undecodable without it; keep waiting
+        const auto timestamp = toMilliseconds(packet.dtsUsec - baseUsec_);
+        if (!session.sendAudio(timestamp, view(flvAacSequenceHeader(view(config))), error))
+            return false;
+        audioHeaderSent_ = true;
+    }
     return session.sendAudio(toMilliseconds(packet.dtsUsec - baseUsec_), view(flvAacFrame(view(packet.data))), error);
 }
 
@@ -130,7 +174,7 @@ void RtmpPublisher::run()
 
     RtmpSession session(*transport);
     std::string error;
-    if (!session.open(target_, kConnectTimeoutMs, error) || !sendHeaders(session, error)) {
+    if (!session.open(target_, kConnectTimeoutMs, error)) {
         session.close();
         notifyFailed(session.failure() == RtmpFailure::None ? RtmpFailure::Connect : session.failure(), error);
         return;

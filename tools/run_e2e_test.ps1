@@ -59,6 +59,43 @@ function Wait-Port([int]$Port) {
     throw "RTMP test server on port $Port did not start."
 }
 
+# Reads a nested JSON field ("video.width"); $null when any part is missing.
+function Field($Object, [string]$Path) {
+    $value = $Object
+    foreach ($part in $Path.Split('.')) {
+        if ($null -eq $value) { return $null }
+        $property = $value.PSObject.Properties[$part]
+        if (-not $property) { return $null }
+        $value = $property.Value
+    }
+    return $value
+}
+
+function Wait-NoE2EProcess {
+    for ($wait = 0; $wait -lt 120 -and (Get-Process abyss_stream_e2e -ErrorAction SilentlyContinue); $wait++) {
+        Start-Sleep -Seconds 1
+    }
+}
+
+# Runs abyss_stream_e2e and returns its exit code, or 1 when it never ran.
+function Invoke-E2E([string[]]$Arguments, [string]$OutputFile) {
+    & $e2eExe @Arguments | Tee-Object -FilePath $OutputFile | Out-Host
+    $code = $LASTEXITCODE
+    if ((Get-Content $OutputFile -Raw -ErrorAction SilentlyContinue) -notmatch 'E2E (PASSED|FAILED)') {
+        Write-Host 'abyss_stream_e2e produced no output: it did not run (an antivirus may be blocking the new build).' -ForegroundColor Yellow
+        Wait-NoE2EProcess
+        return 1
+    }
+    return $code
+}
+
+# Some antivirus products hold a brand-new executable on its first launch:
+# the call returns at once and the real process starts much later. One
+# throwaway launch (it only prints usage) gets that out of the way before
+# the timed runs.
+try { Start-Process -FilePath $e2eExe -Wait -WindowStyle Hidden | Out-Null } catch { }
+Wait-NoE2EProcess
+
 # One run: two servers (B drops once), one shared encode to both, plus a recording.
 function Invoke-Scenario([string]$Name, [int]$PortA, [string[]]$ExtraArgs) {
     Write-Host ''
@@ -87,8 +124,7 @@ function Invoke-Scenario([string]$Name, [int]$PortA, [string[]]$ExtraArgs) {
         ) + $ExtraArgs
         if (Get-Command nvidia-smi.exe -ErrorAction SilentlyContinue) { $e2eArgs += '--require-hardware-encoder' }
         Write-Host "Streaming for $Seconds s to two local servers (B drops once)..."
-        & $e2eExe @e2eArgs
-        $e2eExit = $LASTEXITCODE
+        $e2eExit = Invoke-E2E $e2eArgs (Join-Path $work "$tag-e2e.txt")
     }
     finally {
         Start-Sleep -Milliseconds 500
@@ -104,14 +140,20 @@ function Invoke-Scenario([string]$Name, [int]$PortA, [string[]]$ExtraArgs) {
     Check ($a.Count -ge 1) 'server A accepted the stream key'
     if ($a.Count -ge 1) {
         $s = $a[0]
-        Check ($s.video.width -eq 1920 -and $s.video.height -eq 1080) "server A got H.264 1920x1080 ($($s.video.width)x$($s.video.height) $($s.video.profile))"
-        Check ($s.audio.sampleRate -eq 48000 -and $s.audio.channels -eq 2) "server A got AAC 48 kHz stereo ($($s.audio.sampleRate) Hz, $($s.audio.channels) ch)"
+        $width = Field $s 'video.width'
+        $height = Field $s 'video.height'
+        $rate = Field $s 'audio.sampleRate'
+        $channels = Field $s 'audio.channels'
+        Check ($width -eq 1920 -and $height -eq 1080) "server A got H.264 1920x1080 (${width}x${height} $(Field $s 'video.profile'))"
+        Check ($rate -eq 48000 -and $channels -eq 2) "server A got AAC 48 kHz stereo ($rate Hz, $channels ch)"
         Check ($s.keyframes -ge [math]::Floor($Seconds / 2) - 1) "server A got a keyframe every 2 s ($($s.keyframes) keyframes)"
         Check ($s.videoFrames -ge $Seconds * 50) "server A got ~60 FPS ($($s.videoFrames) frames in $($s.mediaSeconds) s, $($s.kbps) kbps)"
     }
     Check ($b.Count -ge 2) "server B saw the stream come back after the drop ($($b.Count) publishing sessions)"
     if ($b.Count -ge 2) {
-        Check ($b[-1].video.width -eq 1920 -and $b[-1].keyframes -ge 1) 'server B got video again after reconnecting'
+        $last = $b[-1]
+        Check ((Field $last 'video.width') -eq 1920 -and $last.keyframes -ge 1 -and (Field $last 'audio.sampleRate') -eq 48000) `
+            'server B got video and audio again after reconnecting'
     }
     Check ($e2eExit -eq 0) 'abyss_stream_e2e checks passed'
 }

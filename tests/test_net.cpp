@@ -576,3 +576,166 @@ TEST_CASE("Refuses an untrusted TLS certificate (opt-in: ABYSS_TEST_RTMPS_UNTRUS
     CHECK(error.find("certificate") != std::string::npos);
     std::cout << "    refused as expected: " << error << '\n';
 }
+
+TEST_CASE("Publisher waits for codec headers that arrive after it connects")
+{
+    auto server = std::make_shared<FakeRtmpServer>();
+    struct Forwarding final : ITransport {
+        std::shared_ptr<FakeRtmpServer> server;
+        bool connect(const std::string &h, std::uint16_t p, int t, std::string &e) override { return server->connect(h, p, t, e); }
+        bool sendAll(ByteView d, std::string &e) override { return server->sendAll(d, e); }
+        int receive(std::uint8_t *b, size_t s, int t, std::string &e) override { return server->receive(b, s, t, e); }
+        void close() override { server->close(); }
+    };
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool connected = false;
+    bool finished = false;
+    PublisherCallbacks callbacks;
+    callbacks.connected = [&] {
+        std::scoped_lock lock(mutex);
+        connected = true;
+        cv.notify_all();
+    };
+    callbacks.stopped = [&] {
+        std::scoped_lock lock(mutex);
+        finished = true;
+        cv.notify_all();
+    };
+
+    // No SPS/PPS up front, like NVENC before its first frame.
+    RtmpPublisher publisher(target("good-key"), {}, callbacks, {}, [server] {
+        auto transport = std::make_unique<Forwarding>();
+        transport->server = server;
+        return transport;
+    });
+    publisher.start();
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, std::chrono::seconds(5), [&] { return connected; }));
+    }
+
+    // The encoder hands its headers over just before its first packet.
+    publisher.setVideoParameterSets({kSps720, kPps});
+    publisher.setAudioSpecificConfig({0x11, 0x90});
+    EncodedPacket keyframe;
+    keyframe.kind = EncodedPacket::Kind::Video;
+    keyframe.keyframe = true;
+    keyframe.dtsUsec = keyframe.ptsUsec = 2'000'000;
+    keyframe.data = annexB({{0x65, 0x01}});
+    publisher.push(keyframe);
+    EncodedPacket inter = keyframe;
+    inter.dtsUsec = inter.ptsUsec = 2'016'000;
+    inter.keyframe = false;
+    publisher.push(inter);
+    publisher.stop();
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, std::chrono::seconds(5), [&] { return finished; }));
+    }
+    publisher.join();
+
+    std::vector<rtmp::Message> video;
+    for (const auto &message : server->mediaSnapshot()) {
+        if (message.type == rtmp::Video)
+            video.push_back(message);
+    }
+    REQUIRE(video.size() == 3); // sequence header, keyframe at t=0, inter frame at t=16
+    CHECK(video[0].payload[1] == 0x00);
+    const auto config = ByteView(video[0].payload).subspan(5);
+    CHECK(readU16(config.data() + 6) == kSps720.size());
+    CHECK(video[1].timestamp == 0);
+    CHECK(video[2].timestamp == 16);
+}
+
+TEST_CASE("Publisher can take SPS/PPS from inside the first keyframe")
+{
+    auto server = std::make_shared<FakeRtmpServer>();
+    struct Forwarding final : ITransport {
+        std::shared_ptr<FakeRtmpServer> server;
+        bool connect(const std::string &h, std::uint16_t p, int t, std::string &e) override { return server->connect(h, p, t, e); }
+        bool sendAll(ByteView d, std::string &e) override { return server->sendAll(d, e); }
+        int receive(std::uint8_t *b, size_t s, int t, std::string &e) override { return server->receive(b, s, t, e); }
+        void close() override { server->close(); }
+    };
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool connected = false;
+    bool finished = false;
+    PublisherCallbacks callbacks;
+    callbacks.connected = [&] {
+        std::scoped_lock lock(mutex);
+        connected = true;
+        cv.notify_all();
+    };
+    callbacks.stopped = [&] {
+        std::scoped_lock lock(mutex);
+        finished = true;
+        cv.notify_all();
+    };
+    RtmpPublisher publisher(target("good-key"), {}, callbacks, {}, [server] {
+        auto transport = std::make_unique<Forwarding>();
+        transport->server = server;
+        return transport;
+    });
+    publisher.start();
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, std::chrono::seconds(5), [&] { return connected; }));
+    }
+    EncodedPacket keyframe;
+    keyframe.kind = EncodedPacket::Kind::Video;
+    keyframe.keyframe = true;
+    keyframe.data = annexB({kSps1080, kPps, {0x65, 0x01}});
+    publisher.push(keyframe);
+    publisher.stop();
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, std::chrono::seconds(5), [&] { return finished; }));
+    }
+    publisher.join();
+    size_t videoMessages = 0;
+    for (const auto &message : server->mediaSnapshot())
+        videoMessages += message.type == rtmp::Video ? 1 : 0;
+    CHECK(videoMessages == 2); // sequence header + keyframe
+}
+
+TEST_CASE("Publisher holds back a keyframe it has no headers for")
+{
+    auto server = std::make_shared<FakeRtmpServer>();
+    struct Forwarding final : ITransport {
+        std::shared_ptr<FakeRtmpServer> server;
+        bool connect(const std::string &h, std::uint16_t p, int t, std::string &e) override { return server->connect(h, p, t, e); }
+        bool sendAll(ByteView d, std::string &e) override { return server->sendAll(d, e); }
+        int receive(std::uint8_t *b, size_t s, int t, std::string &e) override { return server->receive(b, s, t, e); }
+        void close() override { server->close(); }
+    };
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool finished = false;
+    PublisherCallbacks callbacks;
+    callbacks.stopped = [&] {
+        std::scoped_lock lock(mutex);
+        finished = true;
+        cv.notify_all();
+    };
+    RtmpPublisher publisher(target("good-key"), {}, callbacks, {}, [server] {
+        auto transport = std::make_unique<Forwarding>();
+        transport->server = server;
+        return transport;
+    });
+    publisher.start();
+    EncodedPacket keyframe;
+    keyframe.kind = EncodedPacket::Kind::Video;
+    keyframe.keyframe = true;
+    keyframe.data = annexB({{0x65, 0x01}}); // no SPS/PPS anywhere
+    publisher.push(keyframe);
+    publisher.stop();
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, std::chrono::seconds(5), [&] { return finished; }));
+    }
+    publisher.join();
+    for (const auto &message : server->mediaSnapshot())
+        CHECK(message.type != rtmp::Video); // nothing undecodable was sent
+}

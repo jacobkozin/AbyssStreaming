@@ -17,7 +17,28 @@ struct NativeOutput {
     obs_output_t *output{};
     std::mutex mutex; // guards publisher replacement against packet delivery
     std::unique_ptr<net::RtmpPublisher> publisher;
+    bool videoHeadersSent{false}; // handed to the publisher (guarded by mutex)
+    bool audioHeadersSent{false};
 };
+
+// Gives the publisher the encoder's codec headers once they exist.
+void provideHeaders(NativeOutput *self, const encoder_packet &packet)
+{
+    bool &done = packet.type == OBS_ENCODER_VIDEO ? self->videoHeadersSent : self->audioHeadersSent;
+    if (done || !self->publisher)
+        return;
+    std::uint8_t *extra = nullptr;
+    size_t size = 0;
+    if (!obs_encoder_get_extra_data(packet.encoder, &extra, &size) || size == 0)
+        return;
+    if (packet.type == OBS_ENCODER_VIDEO) {
+        if (auto sets = net::findParameterSets({extra, size}))
+            self->publisher->setVideoParameterSets(std::move(*sets));
+    } else {
+        self->publisher->setAudioSpecificConfig(net::Bytes(extra, extra + size));
+    }
+    done = true;
+}
 
 int stopCodeFor(net::RtmpFailure failure)
 {
@@ -81,21 +102,20 @@ bool startOutput(void *data)
 
     obs_encoder_t *videoEncoder = obs_output_get_video_encoder(self->output);
     obs_encoder_t *audioEncoder = obs_output_get_audio_encoder(self->output, 0);
-    std::uint8_t *extra = nullptr;
-    size_t extraSize = 0;
+    if (!videoEncoder) {
+        obs_output_set_last_error(self->output, "No video encoder is attached to the output.");
+        return false;
+    }
+    // The H.264 SPS/PPS are fetched when the first packets arrive (see
+    // encodedPacket): NVENC only produces them after encoding a frame. The
+    // AAC config is normally ready as soon as the encoder is initialized.
     net::PublisherHeaders headers;
-    if (!videoEncoder || !obs_encoder_get_extra_data(videoEncoder, &extra, &extraSize)) {
-        obs_output_set_last_error(self->output, "The video encoder did not provide its H.264 headers.");
-        return false;
-    }
-    const auto sets = net::findParameterSets({extra, extraSize});
-    if (!sets) {
-        obs_output_set_last_error(self->output, "The video encoder's H.264 headers have no SPS/PPS.");
-        return false;
-    }
-    headers.parameterSets = *sets;
-    if (audioEncoder && obs_encoder_get_extra_data(audioEncoder, &extra, &extraSize))
-        headers.audioSpecificConfig.assign(extra, extra + extraSize);
+    std::uint8_t *audioConfig = nullptr;
+    size_t audioConfigSize = 0;
+    const bool haveAudioConfig =
+        audioEncoder && obs_encoder_get_extra_data(audioEncoder, &audioConfig, &audioConfigSize) && audioConfigSize > 0;
+    if (haveAudioConfig)
+        headers.audioSpecificConfig.assign(audioConfig, audioConfig + audioConfigSize);
 
     if (video_t *video = obs_output_video(self->output)) {
         const video_output_info *info = video_output_get_info(video);
@@ -130,9 +150,16 @@ bool startOutput(void *data)
          static_cast<unsigned>(url->port), url->app.c_str());
     auto publisher = std::make_unique<net::RtmpPublisher>(net::PublishTarget{*url, key ? key : ""}, std::move(headers),
                                                           std::move(callbacks));
-    publisher->start();
-    std::scoped_lock lock(self->mutex);
-    self->publisher = std::move(publisher);
+    net::RtmpPublisher *starting = publisher.get();
+    {
+        // Install it before its thread starts: on a fast connection libobs
+        // delivers the first packets as soon as the connected callback runs.
+        std::scoped_lock lock(self->mutex);
+        self->publisher = std::move(publisher);
+        self->videoHeadersSent = false;
+        self->audioHeadersSent = haveAudioConfig;
+    }
+    starting->start();
     return true;
 }
 
@@ -164,6 +191,7 @@ void encodedPacket(void *data, encoder_packet *packet)
     converted.data.assign(packet->data, packet->data + packet->size);
 
     std::scoped_lock lock(self->mutex);
+    provideHeaders(self, *packet);
     if (self->publisher)
         self->publisher->push(std::move(converted));
 }

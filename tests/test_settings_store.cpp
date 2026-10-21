@@ -10,6 +10,7 @@
 #include <QTemporaryDir>
 #include <QUuid>
 #include <cmath>
+#include <iostream>
 #include <limits>
 
 using namespace abyss;
@@ -59,7 +60,10 @@ TEST_CASE("Settings round-trip through settings.json")
     REQUIRE(dir.isValid());
     SettingsStore store(dir.path());
     QString error;
-    REQUIRE(store.save(sampleSettings(), &error));
+    const bool saved = store.save(sampleSettings(), &error);
+    if (!saved)
+        std::cerr << error.toStdString() << std::endl;
+    REQUIRE(saved);
 
     QString problem;
     const AppSettings loaded = store.load(&problem);

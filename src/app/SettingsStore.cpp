@@ -8,6 +8,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QSaveFile>
+#include <QThread>
 #include <algorithm>
 #include <set>
 
@@ -215,13 +216,20 @@ bool SettingsStore::writeAtomically(const QString &path, const QByteArray &bytes
         QFile::copy(path, path + ".bak");
     }
 
-    QSaveFile file(path);
-    if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() || !file.commit()) {
-        if (error)
-            *error = "Could not save " + path + ": " + file.errorString();
-        return false;
+    // Antivirus scanners can hold a just-written file for a moment, which makes
+    // the final rename fail; a few short retries ride that out.
+    QString lastError;
+    for (int attempt = 0; attempt < 4; ++attempt) {
+        if (attempt > 0)
+            QThread::msleep(150);
+        QSaveFile file(path);
+        if (file.open(QIODevice::WriteOnly) && file.write(bytes) == bytes.size() && file.commit())
+            return true;
+        lastError = file.errorString();
     }
-    return true;
+    if (error)
+        *error = "Could not save " + path + ": " + lastError;
+    return false;
 }
 
 } // namespace abyss
