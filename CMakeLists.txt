@@ -89,6 +89,7 @@ if(ABYSS_BUILD_UI)
 
         add_executable(AbyssStream WIN32
             src/main.cpp
+            src/platform/CrashHandler.cpp
             src/ui/AudioMixerWidget.cpp
             src/ui/DestinationDialog.cpp
             src/ui/MainWindow.cpp
@@ -99,6 +100,9 @@ if(ABYSS_BUILD_UI)
         if(ABYSS_WITH_OBS)
             target_sources(AbyssStream PRIVATE src/ui/ObsPreviewWidget.cpp)
             target_link_libraries(AbyssStream PRIVATE abyss_stream_obs)
+        endif()
+        if(WIN32)
+            target_link_libraries(AbyssStream PRIVATE dbghelp)
         endif()
         target_link_libraries(AbyssStream PRIVATE abyss_stream_app Qt6::Gui Qt6::Widgets)
         set_target_properties(AbyssStream PROPERTIES AUTOMOC ON)
@@ -120,6 +124,10 @@ if(ABYSS_BUILD_TESTS)
     )
     target_link_libraries(abyss_stream_core_tests PRIVATE abyss_stream_core)
     add_test(NAME abyss_stream_core_tests COMMAND abyss_stream_core_tests)
+    # Pass only on the harness's final summary, so a process that is killed
+    # part-way (antivirus, crash with exit code 0) cannot count as a pass.
+    set(ABYSS_TEST_PASS_REGEX "[0-9]+ test\\(s\\), 0 failed check\\(s\\)")
+    set_tests_properties(abyss_stream_core_tests PROPERTIES PASS_REGULAR_EXPRESSION "${ABYSS_TEST_PASS_REGEX}")
 
     if(TARGET abyss_stream_app)
         add_executable(abyss_stream_app_tests
@@ -128,5 +136,9 @@ if(ABYSS_BUILD_TESTS)
         )
         target_link_libraries(abyss_stream_app_tests PRIVATE abyss_stream_app)
         add_test(NAME abyss_stream_app_tests COMMAND abyss_stream_app_tests)
+        # Find Qt's DLLs without copying them next to the test executable.
+        set_tests_properties(abyss_stream_app_tests PROPERTIES
+            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+            PASS_REGULAR_EXPRESSION "${ABYSS_TEST_PASS_REGEX}")
     endif()
 endif()

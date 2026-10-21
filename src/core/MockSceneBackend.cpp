@@ -139,6 +139,7 @@ SceneOperationResult MockSceneBackend::addSource(const SourceRequest &request)
     MockSource source;
     source.request = request;
     source.request.name = uniqueSourceName(request.name.empty() ? sourceKindLabel(request.kind) : request.name);
+    source.layout = defaultLayoutFor(request.kind);
     items->push_back(source);
     return {true, {}, source.request.name};
 }

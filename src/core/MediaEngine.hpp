@@ -8,7 +8,6 @@ namespace abyss {
 
 enum class EncoderPreference {
     Auto,     // hardware (NVENC, then AMD AMF) when available, otherwise x264
-    Hardware, // same order as Auto, but say so when it falls back
     Software, // always x264 on the CPU
 };
 
@@ -33,7 +32,7 @@ public:
     virtual bool applyVideoSettings(const VideoSettings &settings, std::string &error) = 0;
     // Human-readable name of the H.264 encoder in use, e.g. "NVIDIA NVENC H.264".
     virtual std::string videoEncoderName() const = 0;
-    // True when hardware encoding was requested or expected but x264 is in use.
+    // True when hardware encoding was wanted but x264 is in use.
     virtual bool usingEncoderFallback() const = 0;
 };
 

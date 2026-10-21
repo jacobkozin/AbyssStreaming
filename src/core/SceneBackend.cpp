@@ -16,4 +16,14 @@ const char *sourceKindLabel(SourceKind kind)
     return "Source";
 }
 
+SourceLayout defaultLayoutFor(SourceKind kind)
+{
+    switch (kind) {
+    case SourceKind::Text: return {SourcePlacement::Center, 100};
+    case SourceKind::Color: return {SourcePlacement::Stretch, 100};
+    case SourceKind::VideoDevice: return {SourcePlacement::BottomRight, 30};
+    default: return {SourcePlacement::Fit, 100};
+    }
+}
+
 } // namespace abyss

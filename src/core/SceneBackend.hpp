@@ -137,5 +137,8 @@ public:
 };
 
 const char *sourceKindLabel(SourceKind kind);
+// Where a newly added source lands: captures and images fill the canvas,
+// text sits centered at its own size, a webcam goes in the corner.
+SourceLayout defaultLayoutFor(SourceKind kind);
 
 } // namespace abyss

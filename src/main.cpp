@@ -1,137 +1,218 @@
+// Composition root: loads settings, starts the media engine, wires the
+// backends into the main window, and tears everything down in dependency
+// order (outputs -> scenes/audio -> encoders -> libobs).
+
+#include "app/AppPaths.hpp"
+#include "app/SettingsStore.hpp"
+#include "core/MockBackends.hpp"
 #include "core/MockSceneBackend.hpp"
 #include "core/MockStreamBackend.hpp"
+#include "platform/CrashHandler.hpp"
 #include "ui/MainWindow.hpp"
+#include "ui/ObsPreviewWidget.hpp"
 
 #ifdef ABYSS_WITH_OBS
+#include "obs/ObsAudioBackend.hpp"
 #include "obs/ObsEngine.hpp"
+#include "obs/ObsRecordingBackend.hpp"
 #include "obs/ObsSceneBackend.hpp"
 #include "obs/ObsStreamBackend.hpp"
+#endif
+
+#ifdef _WIN32
+#include "platform/WindowsCredentialStore.hpp"
 #endif
 
 #include <QApplication>
 #include <QCoreApplication>
 #include <QDir>
+#include <QLockFile>
 #include <QMessageBox>
 #include <QMetaObject>
-#include <QStandardPaths>
 #include <QThread>
+#include <atomic>
 #include <memory>
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+// Ask hybrid-GPU laptops for the discrete GPU, as OBS Studio does.
 extern "C" __declspec(dllexport) DWORD NvOptimusEnablement = 1;
 extern "C" __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
 #endif
 
-#ifdef ABYSS_WITH_OBS
-static void abyssUiTaskHandler(obs_task_t task, void *param, bool wait)
-{
-    if (!task || !qApp)
-        return;
+namespace {
 
-    if (QThread::currentThread() == qApp->thread()) {
+#ifdef ABYSS_WITH_OBS
+std::atomic<bool> g_eventLoopFinished{false};
+
+// libobs occasionally needs work done on the UI thread. Route it through
+// Qt's event loop; once that loop has ended (shutdown), run tasks inline.
+void uiTaskHandler(obs_task_t task, void *param, bool wait)
+{
+    if (!task)
+        return;
+    if (g_eventLoopFinished || !qApp || QThread::currentThread() == qApp->thread()) {
         task(param);
         return;
     }
-
     QMetaObject::invokeMethod(
-        qApp,
-        [task, param]() { task(param); },
-        wait ? Qt::BlockingQueuedConnection : Qt::QueuedConnection);
+        qApp, [task, param]() { task(param); }, wait ? Qt::BlockingQueuedConnection : Qt::QueuedConnection);
 }
-#endif
 
-int main(int argc, char **argv)
+abyss::ObsEngineConfig engineConfig(const abyss::AppSettings &settings, const QString &dataDirectory)
 {
-    QApplication app(argc, argv);
-    QApplication::setApplicationName("Abyss Stream");
-    QApplication::setOrganizationName("Abyss");
-
-    std::shared_ptr<abyss::IStreamBackend> streamBackend;
-    std::shared_ptr<abyss::ISceneBackend> sceneBackend;
-
-#ifdef ABYSS_WITH_OBS
-    auto engine = std::make_unique<abyss::ObsEngine>();
-
     const QString appDir = QCoreApplication::applicationDirPath();
     QString runtimeRoot = qEnvironmentVariable("ABYSS_OBS_RUNTIME");
     if (runtimeRoot.isEmpty()) {
-        // When deployed beside OBS, AbyssStream.exe lives in bin/64bit.
+        // Deployed beside OBS, AbyssStream.exe lives in <root>/bin/64bit.
         QDir probe(appDir);
         if (probe.cdUp() && probe.cdUp())
             runtimeRoot = probe.absolutePath();
     }
-
-    const QString moduleConfig = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)
-                               + "/obs-module-config";
+    const QDir root(runtimeRoot);
+    const QString moduleConfig = QDir(dataDirectory).filePath("obs-module-config");
     QDir().mkpath(moduleConfig);
 
     abyss::ObsEngineConfig config;
     config.moduleConfigPath = QDir::toNativeSeparators(moduleConfig).toStdString();
-    config.moduleBinaryPath = QDir::toNativeSeparators(QDir(runtimeRoot).filePath("obs-plugins/64bit")).toStdString();
-    config.moduleDataPath = QDir::toNativeSeparators(QDir(runtimeRoot).filePath("data/obs-plugins/%module%" )).toStdString();
-    config.libobsDataPath = QDir::toNativeSeparators(QDir(runtimeRoot).filePath("data/libobs")).toStdString();
+    config.moduleBinaryPath = QDir::toNativeSeparators(root.filePath("obs-plugins/64bit")).toStdString();
+    config.moduleDataPath = QDir::toNativeSeparators(root.filePath("data/obs-plugins/%module%")).toStdString();
+    config.libobsDataPath = QDir::toNativeSeparators(root.filePath("data/libobs")).toStdString();
+    config.runtimeBinPath = QDir::toNativeSeparators(root.filePath("bin/64bit")).toStdString();
 #ifdef _WIN32
-    config.graphicsModulePath = QDir::toNativeSeparators(QDir(runtimeRoot).filePath("bin/64bit/libobs-d3d11.dll")).toStdString();
+    config.graphicsModulePath = QDir::toNativeSeparators(root.filePath("bin/64bit/libobs-d3d11.dll")).toStdString();
 #else
     config.graphicsModulePath = "libobs-opengl";
 #endif
     config.logPath = QDir::toNativeSeparators(QDir(appDir).filePath("AbyssStream-obs.log")).toStdString();
+    config.video = settings.video;
+    return config;
+}
+#endif
 
-    const auto started = engine->start(config);
+} // namespace
+
+int main(int argc, char **argv)
+{
+    QApplication app(argc, argv);
+    // These two names decide the data folder: %LOCALAPPDATA%\Abyss\Abyss Stream.
+    QApplication::setOrganizationName("Abyss");
+    QApplication::setApplicationName("Abyss Stream");
+    QApplication::setApplicationVersion(ABYSS_STREAM_VERSION);
+
+    const QString dataDirectory = abyss::appDataDirectory();
+    QDir().mkpath(dataDirectory);
+    abyss::installCrashHandler(QDir::toNativeSeparators(QCoreApplication::applicationDirPath()).toStdWString());
+
+    // Two copies would fight over the same settings, scenes and capture hooks.
+    QLockFile instanceLock(QDir(dataDirectory).filePath("instance.lock"));
+    instanceLock.setStaleLockTime(0);
+    if (!instanceLock.tryLock(100)) {
+        QMessageBox::information(nullptr, "Abyss Stream", "Abyss Stream is already running.");
+        return 0;
+    }
+
+    abyss::SettingsStore settingsStore(dataDirectory);
+    QString settingsProblem;
+    abyss::AppSettings settings = settingsStore.load(&settingsProblem);
+    if (!settingsProblem.isEmpty())
+        QMessageBox::warning(nullptr, "Abyss Stream - settings reset", settingsProblem);
+
+#ifdef _WIN32
+    auto secrets = std::make_unique<abyss::WindowsCredentialStore>();
+#else
+    auto secrets = std::make_unique<abyss::MemorySecretStore>();
+#endif
+
+    abyss::AppServices services;
+    services.secrets = secrets.get();
+    services.settingsStore = &settingsStore;
+
+#ifdef ABYSS_WITH_OBS
+    auto engine = std::make_unique<abyss::ObsEngine>();
+    const auto started = engine->start(engineConfig(settings, dataDirectory));
     if (!started.ok) {
         QString details = QString::fromStdString(started.error);
         if (!started.failedModules.empty()) {
             details += "\n\nModules that failed to load:";
             for (const auto &module : started.failedModules)
-                details += "\n• " + QString::fromStdString(module);
+                details += "\n- " + QString::fromStdString(module);
         }
+        details += "\n\nIf this keeps happening, run BUILD_AND_RUN.bat again; it re-checks the OBS runtime.";
         if (!started.logPath.empty())
-            details += "\n\nDetailed OBS log:\n" + QString::fromStdString(started.logPath);
-        details += "\n\nSend AbyssStream-obs.log with this popup if startup still fails.";
-        QMessageBox::critical(nullptr, "Abyss Stream — OBS engine failed", details);
+            details += "\n\nDetailed log:\n" + QString::fromStdString(started.logPath);
+        QMessageBox::critical(nullptr, "Abyss Stream - the video engine could not start", details);
         return 2;
     }
+    obs_set_ui_task_handler(&uiTaskHandler);
 
-    // We are a Qt/libobs frontend, so route OBS UI tasks through Qt's main
-    // thread.  This is intentionally separate from OBS Studio's frontend API.
-    obs_set_ui_task_handler(&abyssUiTaskHandler);
+    auto streamBackend = std::make_shared<abyss::ObsStreamBackend>(*engine);
+    auto recordingBackend = std::make_shared<abyss::ObsRecordingBackend>(*engine);
+    auto audioBackend = std::make_shared<abyss::ObsAudioBackend>();
+    audioBackend->restore(abyss::AudioChannel::Desktop, settings.desktopAudio);
+    audioBackend->restore(abyss::AudioChannel::Microphone, settings.microphone);
 
-    auto obsStreamBackend = std::make_shared<abyss::ObsStreamBackend>();
-    obsStreamBackend->setSharedEncoders(engine->videoEncoder(), engine->audioEncoder());
-    streamBackend = obsStreamBackend;
-
-    auto obsSceneBackend = std::make_shared<abyss::ObsSceneBackend>(config.baseWidth, config.baseHeight);
+    auto sceneBackend =
+        std::make_shared<abyss::ObsSceneBackend>(engine->videoSettings().canvasWidth, engine->videoSettings().canvasHeight);
+    QString sceneProblem;
+    if (const auto saved = settingsStore.loadScenes(&sceneProblem)) {
+        std::string error;
+        if (!sceneBackend->loadState(*saved, error))
+            sceneProblem = "Saved scenes could not be loaded (" + QString::fromStdString(error) +
+                           "). Starting with the default scenes; the old file is kept as scenes.json.bak.";
+    }
     std::string sceneError;
-    if (!obsSceneBackend->initializeDefaults(sceneError)) {
-        QMessageBox::critical(nullptr, "Abyss Stream — scene engine failed", QString::fromStdString(sceneError));
-        streamBackend.reset();
-        obs_set_ui_task_handler(nullptr);
-        engine.reset();
+    if (!sceneBackend->initializeDefaults(sceneError)) {
+        QMessageBox::critical(nullptr, "Abyss Stream - scene engine failed", QString::fromStdString(sceneError));
         return 3;
     }
-    sceneBackend = obsSceneBackend;
+    if (!sceneProblem.isEmpty())
+        QMessageBox::warning(nullptr, "Abyss Stream - scenes", sceneProblem);
+
+    services.stream = streamBackend;
+    services.scenes = sceneBackend;
+    services.audio = audioBackend;
+    services.recording = recordingBackend;
+    services.engine = engine.get();
+    services.createPreview = [](QWidget *parent) -> QWidget * { return new abyss::ObsPreviewWidget(parent); };
+    services.engineDescription = QString("libobs %1, logging to %2")
+                                     .arg(QString::fromStdString(started.obsVersion),
+                                          QString::fromStdString(started.logPath));
 #else
-    streamBackend = std::make_shared<abyss::MockStreamBackend>();
-    sceneBackend = std::make_shared<abyss::MockSceneBackend>();
+    auto engine = std::make_unique<abyss::MockMediaEngine>();
+    services.stream = std::make_shared<abyss::MockStreamBackend>();
+    services.scenes = std::make_shared<abyss::MockSceneBackend>();
+    services.audio = std::make_shared<abyss::MockAudioBackend>();
+    services.recording = std::make_shared<abyss::MockRecordingBackend>();
+    services.engine = engine.get();
+    services.engineDescription = "Mock engine (built without libobs)";
 #endif
 
     int exitCode = 0;
     {
-        abyss::MainWindow window(streamBackend, sceneBackend);
+        abyss::MainWindow window(services, settings);
 #ifndef ABYSS_WITH_OBS
-        window.setWindowTitle(window.windowTitle() + " — MOCK BACKEND");
+        window.setWindowTitle(window.windowTitle() + " - MOCK ENGINE");
 #endif
         window.show();
         exitCode = app.exec();
     }
+    services = {};
 
-    // Stop/release outputs first, then release scene/source objects, then libobs.
-    streamBackend.reset();
-    sceneBackend.reset();
 #ifdef ABYSS_WITH_OBS
-    obs_set_ui_task_handler(nullptr);
+    g_eventLoopFinished = true;
+    // Release in dependency order: outputs hold encoders, scenes and audio
+    // hold sources, and libobs must outlive all of them.
+    streamBackend->releaseAll();
+    recordingBackend->release();
+    sceneBackend->releaseAll();
+    audioBackend->releaseAll();
+    streamBackend.reset();
+    recordingBackend.reset();
+    sceneBackend.reset();
+    audioBackend.reset();
+    obs_wait_for_destroy_queue();
     engine.reset();
 #endif
     return exitCode;

@@ -43,9 +43,10 @@ inline int runAll()
     for (const auto &test : registry()) {
         const int before = failureCount();
         test.run();
-        std::cout << (failureCount() == before ? "[pass] " : "[FAIL] ") << test.name << '\n';
+        // Flush per test so a hang or crash still shows how far the run got.
+        std::cout << (failureCount() == before ? "[pass] " : "[FAIL] ") << test.name << std::endl;
     }
-    std::cout << registry().size() << " test(s), " << failureCount() << " failed check(s)\n";
+    std::cout << registry().size() << " test(s), " << failureCount() << " failed check(s)" << std::endl;
     return failureCount() == 0 ? 0 : 1;
 }
 

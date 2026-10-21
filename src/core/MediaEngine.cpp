@@ -4,21 +4,12 @@ namespace abyss {
 
 std::string_view encoderPreferenceId(EncoderPreference preference)
 {
-    switch (preference) {
-    case EncoderPreference::Hardware: return "hardware";
-    case EncoderPreference::Software: return "software";
-    case EncoderPreference::Auto: break;
-    }
-    return "auto";
+    return preference == EncoderPreference::Software ? "software" : "auto";
 }
 
 EncoderPreference encoderPreferenceFromId(std::string_view id)
 {
-    if (id == "hardware")
-        return EncoderPreference::Hardware;
-    if (id == "software")
-        return EncoderPreference::Software;
-    return EncoderPreference::Auto;
+    return id == "software" ? EncoderPreference::Software : EncoderPreference::Auto;
 }
 
 std::string validateVideoSettings(const VideoSettings &settings)

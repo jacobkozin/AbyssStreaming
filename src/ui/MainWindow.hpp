@@ -1,69 +1,111 @@
 #pragma once
+#include "core/AppSettings.hpp"
+#include "core/BitrateMeter.hpp"
 #include "core/MultistreamController.hpp"
-#include "core/SceneBackend.hpp"
+#include "ui/AppServices.hpp"
 #include <QMainWindow>
 #include <QMap>
-#include <memory>
+#include <map>
 
-class QLabel;
-class QPushButton;
 class QCheckBox;
-class QVBoxLayout;
+class QLabel;
 class QListWidget;
-class QListWidgetItem;
+class QPushButton;
+class QFrame;
+class QTimer;
+class QVBoxLayout;
 
 namespace abyss {
+
+class AudioMixerWidget;
 
 class MainWindow final : public QMainWindow {
     Q_OBJECT
 public:
-    MainWindow(std::shared_ptr<IStreamBackend> streamBackend,
-               std::shared_ptr<ISceneBackend> sceneBackend,
-               QWidget *parent = nullptr);
+    MainWindow(AppServices services, AppSettings settings, QWidget *parent = nullptr);
 
-private slots:
-    void addDestination();
-    void toggleStreaming();
-    void refreshTelemetry();
-    void addScene();
-    void removeScene();
-    void removeSource();
-    void editSource();
+protected:
+    void closeEvent(QCloseEvent *event) override;
 
 private:
-    struct DestinationWidgets {
+    struct DestinationRow {
+        QFrame *frame{};
         QCheckBox *enabled{};
         QLabel *status{};
+        QLabel *detail{};
+        QPushButton *startStop{};
     };
 
-    void seedDefaults();
-    void rebuildDestinations();
-    void editDestination(const std::string &id);
-    bool runDestinationDialog(StreamDestination &destination, bool creating);
-    void updateGoLiveButton();
+    // Layout
+    QWidget *buildScenesPanel();
+    QWidget *buildCenterPanel();
+    QWidget *buildOutputsPanel();
+    QWidget *buildFooter();
 
+    // Scenes and sources
     void rebuildScenes();
-    void rebuildSources();
+    void rebuildSources(const QString &select = {});
     void switchScene(const QString &name);
-    void addCaptureSource(CaptureKind kind);
-    bool runCaptureDialog(CaptureKind kind, CaptureRequest &request, bool editing = false);
-    void showSceneError(const SceneOperationResult &result, const QString &title);
+    void addScene();
+    void renameScene();
+    void removeScene();
+    void addSource(SourceKind kind);
+    void editSource();
+    void removeSource();
+    void moveSource(SourceMove move);
+    void setSourceLayout(SourcePlacement placement, int scalePercent);
+    void showSourceMenu(const QPoint &pos);
+    void showSceneMenu(const QPoint &pos);
+    QString selectedSource() const;
     void scheduleDisplayAutoTune(const std::string &name);
+    void showSceneError(const SceneOperationResult &result, const QString &title);
 
+    // Destinations and going live
+    void loadDestinations();
+    void rebuildDestinations();
+    void addDestination();
+    void editDestination(const std::string &id);
+    void removeDestination(const std::string &id);
+    void toggleDestination(const std::string &id);
+    bool storeStreamKey(const StreamDestination &destination, const std::string &previousKey);
+    void toggleStreaming();
+    void toggleRecording();
+    void openSettings();
+    void refreshTelemetry();
+    void updateRow(const StreamDestination &destination, DestinationRow &row);
+    void updateFooter();
+
+    // Persistence
+    void saveSettings();
+    void scheduleSceneSave();
+    void saveScenesNow();
+    bool waitForOutputsToStop(int timeoutMs);
+
+    AppServices services_;
+    AppSettings settings_;
     MultistreamController controller_;
-    std::shared_ptr<ISceneBackend> sceneBackend_;
-
-    QWidget *destinationsHost_{};
-    QVBoxLayout *destinationsLayout_{};
-    QPushButton *goLiveButton_{};
-    QLabel *globalStatus_{};
-    QMap<QString, DestinationWidgets> destinationWidgets_;
 
     QListWidget *scenesList_{};
     QListWidget *sourcesList_{};
     QPushButton *removeSceneButton_{};
     QPushButton *editSourceButton_{};
     QPushButton *removeSourceButton_{};
+    QPushButton *sourceUpButton_{};
+    QPushButton *sourceDownButton_{};
+    AudioMixerWidget *mixer_{};
+
+    QWidget *destinationsHost_{};
+    QVBoxLayout *destinationsLayout_{};
+    std::map<std::string, DestinationRow> rows_;
+    std::map<std::string, BitrateMeter> bitrates_;
+
+    QLabel *statusLabel_{};
+    QLabel *encoderLabel_{};
+    QPushButton *recordButton_{};
+    QPushButton *goLiveButton_{};
+    QTimer *sceneSaveTimer_{};
+    QTimer *settingsSaveTimer_{};
+    QString lastRecordingMessage_;
     bool sceneUiRefreshing_{false};
     bool sourceUiRefreshing_{false};
 };
