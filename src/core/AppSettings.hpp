@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/AudioBackend.hpp"
+#include "core/IStreamBackend.hpp"
 #include "core/MediaEngine.hpp"
 #include "core/RecordingBackend.hpp"
 #include "core/StreamDestination.hpp"
@@ -18,6 +19,7 @@ struct AppSettings {
     AudioChannelState desktopAudio;
     AudioChannelState microphone;
     std::vector<StreamDestination> destinations; // streamKey is never serialized
+    TransportOptions transport;
     std::string windowGeometry;                  // opaque, base64 from QWidget::saveGeometry
 };
 

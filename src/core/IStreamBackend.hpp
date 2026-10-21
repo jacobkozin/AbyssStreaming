@@ -36,6 +36,12 @@ struct StartResult {
     std::string error;
 };
 
+struct TransportOptions {
+    // Use Abyss's own RTMP/RTMPS client instead of the engine's built-in one.
+    // Experimental; applies to outputs started afterwards.
+    bool abyssRtmpClient{false};
+};
+
 class IStreamBackend {
 public:
     virtual ~IStreamBackend() = default;
@@ -43,6 +49,7 @@ public:
     virtual void stop(const std::string &destinationId) = 0;
     virtual void stopAll() = 0;
     virtual OutputTelemetry telemetry(const std::string &destinationId) const = 0;
+    virtual void setTransportOptions(const TransportOptions &) {}
 };
 
 } // namespace abyss

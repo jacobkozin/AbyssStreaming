@@ -23,6 +23,7 @@ public:
     void stop(const std::string &destinationId) override;
     void stopAll() override;
     OutputTelemetry telemetry(const std::string &destinationId) const override;
+    void setTransportOptions(const TransportOptions &options) override { transport_ = options; }
 
     // Releases every output immediately (used during shutdown).
     void releaseAll();
@@ -53,6 +54,7 @@ private:
     void release(OutputBundle &bundle);
 
     ObsEngine &engine_;
+    TransportOptions transport_;
     std::unordered_map<std::string, std::unique_ptr<OutputBundle>> outputs_;
 };
 

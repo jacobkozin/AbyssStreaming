@@ -94,6 +94,7 @@ QJsonObject SettingsStore::toJson(const AppSettings &settings)
          QJsonObject{{"desktop", channelToJson(settings.desktopAudio)},
                      {"microphone", channelToJson(settings.microphone)}}},
         {"destinations", destinations},
+        {"streaming", QJsonObject{{"abyssRtmpClient", settings.transport.abyssRtmpClient}}},
         {"window", QJsonObject{{"geometry", q(settings.windowGeometry)}}},
     };
 }
@@ -141,6 +142,7 @@ AppSettings SettingsStore::fromJson(const QJsonObject &json)
         settings.destinations = defaultDestinations();
     }
 
+    settings.transport.abyssRtmpClient = json["streaming"].toObject()["abyssRtmpClient"].toBool(false);
     settings.windowGeometry = s(json["window"].toObject()["geometry"]);
     return settings;
 }

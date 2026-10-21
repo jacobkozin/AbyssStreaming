@@ -1,5 +1,6 @@
 #include "ui/SettingsDialog.hpp"
 
+#include <QCheckBox>
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QFileDialog>
@@ -54,6 +55,7 @@ SettingsDialog::SettingsDialog(const AppSettings &current, const IAudioBackend &
     tabs->addTab(buildVideoTab(pipelineBusy, encoderInUse), "Video");
     tabs->addTab(buildAudioTab(audio), "Audio");
     tabs->addTab(buildRecordingTab(), "Recording");
+    tabs->addTab(buildAdvancedTab(pipelineBusy), "Advanced");
     layout->addWidget(tabs);
 
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
@@ -174,6 +176,22 @@ QWidget *SettingsDialog::buildRecordingTab()
     return page;
 }
 
+QWidget *SettingsDialog::buildAdvancedTab(bool pipelineBusy)
+{
+    auto *page = new QWidget(this);
+    auto *form = new QFormLayout(page);
+    abyssRtmpClient_ = new QCheckBox("Use Abyss's own RTMP/RTMPS client (experimental)", page);
+    abyssRtmpClient_->setChecked(settings_.transport.abyssRtmpClient);
+    form->addRow(abyssRtmpClient_);
+    form->addRow(hint("Sends the same shared encode through Abyss Stream's built-in RTMP code (TLS via Windows "
+                      "Schannel) instead of OBS's RTMP output. Status, reconnects and statistics work the same. "
+                      "Applies to outputs started after you save.",
+                      page));
+    if (pipelineBusy)
+        form->addRow(hint("Outputs that are live now keep the client they started with.", page));
+    return page;
+}
+
 void SettingsDialog::accept()
 {
     AppSettings result = settings_;
@@ -197,6 +215,7 @@ void SettingsDialog::accept()
 
     result.recording.directory = recordingFolder_->text().trimmed().toStdString();
     result.recording.format = static_cast<RecordingFormat>(recordingFormat_->currentData().toInt());
+    result.transport.abyssRtmpClient = abyssRtmpClient_->isChecked();
     if (result.recording.directory.empty()) {
         QMessageBox::warning(this, "Recording folder", "Choose a folder for recordings.");
         return;

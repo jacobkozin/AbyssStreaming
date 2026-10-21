@@ -118,6 +118,7 @@ MainWindow::MainWindow(AppServices services, AppSettings settings, QWidget *pare
     settingsSaveTimer_->setInterval(500);
     connect(settingsSaveTimer_, &QTimer::timeout, this, &MainWindow::saveSettings);
 
+    services_.stream->setTransportOptions(settings_.transport);
     loadDestinations();
     rebuildDestinations();
     rebuildScenes();
@@ -856,6 +857,8 @@ void MainWindow::openSettings()
     mixer_->refreshFromBackend();
 
     settings_.recording = chosen.recording;
+    settings_.transport = chosen.transport;
+    services_.stream->setTransportOptions(settings_.transport);
     saveSettings();
     updateFooter();
 }

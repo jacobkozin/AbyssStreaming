@@ -4,6 +4,7 @@
 #include "core/AudioBackend.hpp"
 #include <QDialog>
 
+class QCheckBox;
 class QComboBox;
 class QLabel;
 class QLineEdit;
@@ -28,6 +29,7 @@ private:
     QWidget *buildVideoTab(bool pipelineBusy, const QString &encoderInUse);
     QWidget *buildAudioTab(const IAudioBackend &audio);
     QWidget *buildRecordingTab();
+    QWidget *buildAdvancedTab(bool pipelineBusy);
     static void fillDevices(QComboBox *combo, const std::vector<AudioDeviceInfo> &devices, const std::string &current);
 
     AppSettings settings_;
@@ -41,6 +43,7 @@ private:
     QComboBox *micDevice_{};
     QLineEdit *recordingFolder_{};
     QComboBox *recordingFormat_{};
+    QCheckBox *abyssRtmpClient_{};
 };
 
 } // namespace abyss

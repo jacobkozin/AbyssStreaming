@@ -30,6 +30,7 @@ struct Options {
     int seconds{15};
     bool expectReconnectB{false};
     bool requireHardwareEncoder{false};
+    bool abyssRtmp{false}; // use Abyss's own RTMP client instead of OBS's rtmp_output
 };
 
 const char *stateName(OutputState state)
@@ -61,6 +62,8 @@ bool parse(int argc, char **argv, Options &options)
             options.expectReconnectB = true;
         else if (arg == "--require-hardware-encoder")
             options.requireHardwareEncoder = true;
+        else if (arg == "--abyss-rtmp")
+            options.abyssRtmp = true;
         else
             return false;
     }
@@ -106,7 +109,7 @@ int main(int argc, char **argv)
     if (!parse(argc, argv, options)) {
         std::fprintf(stderr, "usage: abyss_stream_e2e --server-a URL --key-a KEY --server-b URL --key-b KEY "
                              "--record-dir DIR [--seconds N] [--expect-reconnect-b] [--require-hardware-encoder] "
-                             "[--log FILE]\n");
+                             "[--abyss-rtmp] [--log FILE]\n");
         return 2;
     }
     const std::string runtime = environment("ABYSS_OBS_RUNTIME");
@@ -154,6 +157,8 @@ int main(int argc, char **argv)
         check(scenes.addSource(text).ok, "text source added");
 
         ObsStreamBackend stream(engine);
+        stream.setTransportOptions({options.abyssRtmp});
+        std::printf("rtmp client: %s\n", options.abyssRtmp ? "Abyss (src/net)" : "OBS rtmp_output");
         ObsRecordingBackend recording(engine);
 
         StreamDestination a{"a", Platform::Custom, "Server A", options.serverA, options.keyA, true};

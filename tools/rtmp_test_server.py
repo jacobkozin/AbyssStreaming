@@ -15,6 +15,7 @@ Options:
     --stats FILE.json     write a JSON summary of every session on exit/disconnect
     --drop-after SECONDS  close the connection once, after this long, to test
                           the publisher's automatic reconnect
+    --tls-cert/--tls-key  serve rtmps:// with this certificate and key (PEM)
 
 This implements just enough of RTMP for a publisher: the simple handshake,
 chunk streams, AMF0 commands (connect, createStream, publish) and media
@@ -27,6 +28,7 @@ import argparse
 import asyncio
 import json
 import os
+import ssl
 import struct
 import sys
 import time
@@ -505,8 +507,10 @@ class RtmpConnection:
 
 
 class TestServer:
-    def __init__(self, port: int, key: str | None, record: str | None, stats: str | None, drop_after: float | None):
+    def __init__(self, port: int, key: str | None, record: str | None, stats: str | None, drop_after: float | None,
+                 tls: ssl.SSLContext | None = None):
         self.port = port
+        self.tls = tls
         self.key = key
         self.flv = FlvWriter(record) if record else None
         self.stats = stats
@@ -521,8 +525,9 @@ class TestServer:
 
     async def serve(self) -> None:
         server = await asyncio.start_server(
-            lambda r, w: RtmpConnection(self, r, w).run(), "127.0.0.1", self.port)
-        print(f"RTMP test server listening on rtmp://127.0.0.1:{self.port}/live"
+            lambda r, w: RtmpConnection(self, r, w).run(), "127.0.0.1", self.port, ssl=self.tls)
+        scheme = "rtmps" if self.tls else "rtmp"
+        print(f"RTMP test server listening on {scheme}://127.0.0.1:{self.port}/live"
               + (f" (key: {'*' * len(self.key)})" if self.key else " (any key)"), flush=True)
         self.write_stats()
         async with server:
@@ -671,11 +676,17 @@ def main() -> int:
     parser.add_argument("--record", help="write the received stream to this FLV file")
     parser.add_argument("--stats", help="write a JSON summary of sessions to this file")
     parser.add_argument("--drop-after", type=float, help="drop the first publishing connection after N seconds")
+    parser.add_argument("--tls-cert", help="PEM certificate: serve rtmps:// instead of rtmp://")
+    parser.add_argument("--tls-key", help="PEM private key for --tls-cert")
     parser.add_argument("--self-test", action="store_true", help="check this server against a built-in publisher")
     args = parser.parse_args()
     if args.self_test:
         return asyncio.run(run_self_test())
-    server = TestServer(args.port, args.key, args.record, args.stats, args.drop_after)
+    tls = None
+    if args.tls_cert:
+        tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        tls.load_cert_chain(args.tls_cert, args.tls_key)
+    server = TestServer(args.port, args.key, args.record, args.stats, args.drop_after, tls)
     try:
         asyncio.run(server.serve())
     except KeyboardInterrupt:

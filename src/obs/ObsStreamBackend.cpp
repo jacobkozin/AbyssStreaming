@@ -2,6 +2,7 @@
 #include "obs/ObsStreamBackend.hpp"
 #include "core/LogRedactor.hpp"
 #include "obs/ObsEngine.hpp"
+#include "obs/ObsNativeRtmpOutput.hpp"
 
 namespace abyss {
 
@@ -82,6 +83,8 @@ StartResult ObsStreamBackend::start(const StreamDestination &destination)
     const char *preferredType = obs_service_get_preferred_output_type(bundle->service);
     if (!preferredType || !*preferredType)
         preferredType = "rtmp_output";
+    if (transport_.abyssRtmpClient)
+        preferredType = kAbyssRtmpOutputId; // same encoders and signals, Abyss's own network code
 
     bundle->output = obs_output_create(preferredType, ("abyss-output-" + destination.id).c_str(), nullptr, nullptr);
     if (!bundle->output) {

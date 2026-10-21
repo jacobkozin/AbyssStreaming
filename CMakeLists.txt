@@ -40,6 +40,25 @@ add_library(abyss_stream_core STATIC
 )
 target_include_directories(abyss_stream_core PUBLIC src)
 
+# --- Network: Abyss's own RTMP/RTMPS publisher. No Qt, no libobs. ------------
+find_package(Threads REQUIRED)
+add_library(abyss_stream_net STATIC
+    src/net/Amf0.cpp
+    src/net/Flv.cpp
+    src/net/H264.cpp
+    src/net/RtmpChunk.cpp
+    src/net/RtmpPublisher.cpp
+    src/net/RtmpSession.cpp
+    src/net/RtmpUrl.cpp
+    src/net/TcpTransport.cpp
+    src/net/TlsTransport.cpp
+)
+target_include_directories(abyss_stream_net PUBLIC src)
+target_link_libraries(abyss_stream_net PUBLIC Threads::Threads)
+if(WIN32)
+    target_link_libraries(abyss_stream_net PUBLIC ws2_32 secur32)
+endif()
+
 # --- libobs adapters ----------------------------------------------------------
 if(ABYSS_WITH_OBS)
     if(NOT TARGET OBS::libobs)
@@ -64,12 +83,13 @@ if(ABYSS_WITH_OBS)
     add_library(abyss_stream_obs STATIC
         src/obs/ObsAudioBackend.cpp
         src/obs/ObsEngine.cpp
+        src/obs/ObsNativeRtmpOutput.cpp
         src/obs/ObsRecordingBackend.cpp
         src/obs/ObsSceneBackend.cpp
         src/obs/ObsStreamBackend.cpp
     )
     target_compile_definitions(abyss_stream_obs PUBLIC ABYSS_WITH_OBS=1)
-    target_link_libraries(abyss_stream_obs PUBLIC abyss_stream_core OBS::libobs)
+    target_link_libraries(abyss_stream_obs PUBLIC abyss_stream_core abyss_stream_net OBS::libobs)
 
     # Headless end-to-end test of the real pipeline. Not part of ctest: it
     # needs the OBS runtime and local RTMP servers (tools/run_e2e_test.ps1).
@@ -125,11 +145,12 @@ if(ABYSS_BUILD_TESTS)
     add_executable(abyss_stream_core_tests
         tests/test_main.cpp
         tests/test_controller.cpp
+        tests/test_net.cpp
         tests/test_platforms.cpp
         tests/test_scene_backend.cpp
         tests/test_utilities.cpp
     )
-    target_link_libraries(abyss_stream_core_tests PRIVATE abyss_stream_core)
+    target_link_libraries(abyss_stream_core_tests PRIVATE abyss_stream_core abyss_stream_net)
     add_test(NAME abyss_stream_core_tests COMMAND abyss_stream_core_tests)
     # Pass only on the harness's final summary, so a process that is killed
     # part-way (antivirus, crash with exit code 0) cannot count as a pass.

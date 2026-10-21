@@ -4,6 +4,7 @@
 // builds (NDEBUG), and both CI and BUILD_AND_RUN.bat build Release, so these
 // macros always evaluate their expression and report every failure.
 
+#include <cstdlib>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -30,6 +31,23 @@ inline int &failureCount()
 struct Registrar {
     Registrar(const char *name, void (*run)()) { registry().push_back({name, run}); }
 };
+
+// Reads an environment variable (opt-in integration tests); empty if unset.
+inline std::string environment(const char *name)
+{
+#ifdef _MSC_VER
+    char *value = nullptr;
+    size_t length = 0;
+    if (_dupenv_s(&value, &length, name) != 0 || !value)
+        return {};
+    std::string result(value);
+    free(value);
+    return result;
+#else
+    const char *value = std::getenv(name);
+    return value ? value : "";
+#endif
+}
 
 inline void reportFailure(const char *expression, const char *file, int line)
 {

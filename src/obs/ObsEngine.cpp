@@ -2,6 +2,7 @@
 #include "obs/ObsEngine.hpp"
 #include "core/LogRedactor.hpp"
 #include "core/PathUtf8.hpp"
+#include "obs/ObsNativeRtmpOutput.hpp"
 
 #include <array>
 #include <chrono>
@@ -323,6 +324,7 @@ ObsEngineStartResult ObsEngine::start(const ObsEngineConfig &config)
     }
     obs_post_load_modules();
     obs_log_loaded_modules();
+    registerAbyssRtmpOutput();
 
     if (!createEncoders(config.video, error)) {
         result.error = std::move(error);
