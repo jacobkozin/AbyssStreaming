@@ -1,3 +1,8 @@
+param(
+    # Build and test only; do not start the app afterwards.
+    [switch]$NoLaunch
+)
+
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -406,14 +411,25 @@ try {
     }
     Write-Host "Import library: $obsLib" -ForegroundColor DarkGray
 
-    Write-Step '5/6  Configuring and building Abyss Stream'
+    Write-Step '5/6  Configuring, building and testing Abyss Stream'
     $nativeBuild = Join-Path $BuildRoot 'windows-x64'
     New-Item -ItemType Directory -Force -Path $nativeBuild | Out-Null
+
+    # Ninja ships with Visual Studio's C++ CMake tools and builds in parallel;
+    # NMake is the fallback that every MSVC install has.
+    $generator = if (Get-CommandPath 'ninja.exe') { 'Ninja' } else { 'NMake Makefiles' }
+    $cache = Join-Path $nativeBuild 'CMakeCache.txt'
+    if ((Test-Path $cache) -and -not (Select-String -Path $cache -SimpleMatch "CMAKE_GENERATOR:INTERNAL=$generator" -Quiet)) {
+        Write-Host "Switching the build folder to the $generator generator." -ForegroundColor DarkGray
+        Remove-Item -Force $cache
+        Remove-Item -Recurse -Force (Join-Path $nativeBuild 'CMakeFiles') -ErrorAction SilentlyContinue
+    }
+    Write-Host "Generator: $generator" -ForegroundColor DarkGray
 
     $configureArgs = @(
         '-S', $ProjectRoot,
         '-B', $nativeBuild,
-        '-G', 'NMake Makefiles',
+        '-G', $generator,
         '-DCMAKE_BUILD_TYPE=Release',
         '-DABYSS_BUILD_UI=ON',
         '-DABYSS_WITH_OBS=ON',
@@ -428,7 +444,7 @@ try {
     $ctest = Join-Path (Split-Path $CMakeExe -Parent) 'ctest.exe'
     if (-not (Test-Path $ctest)) { $ctest = Get-CommandPath 'ctest.exe' }
     if ($ctest) {
-        Invoke-Checked -Exe $ctest -Arguments @('--test-dir', $nativeBuild, '-C', 'Release', '--output-on-failure') -FailureMessage 'Abyss Stream core tests failed'
+        Invoke-Checked -Exe $ctest -Arguments @('--test-dir', $nativeBuild, '-C', 'Release', '--output-on-failure') -FailureMessage 'Abyss Stream tests failed'
     } else {
         Write-Host 'ctest.exe was not found; skipping the automated test command.' -ForegroundColor Yellow
     }
@@ -439,14 +455,19 @@ try {
     Set-Content -Path (Join-Path $BuildRoot 'last_obs_root.txt') -Value $obs.Root -Encoding UTF8
     Set-Content -Path (Join-Path $BuildRoot 'last_qt_root.txt') -Value $qtRoot -Encoding UTF8
 
-    Write-Step '6/6  Launching Abyss Stream'
-    Write-Host 'Build passed. The application will open now.' -ForegroundColor Green
-    Write-Host 'For this first smoke test, try Display Capture, Window Capture, and Game Capture.' -ForegroundColor Green
-    Write-Host ''
-
     $runScript = Join-Path $PSScriptRoot 'run_last_build.ps1'
-    & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $runScript
-    if ($LASTEXITCODE -ne 0) { throw "Abyss Stream exited with code $LASTEXITCODE." }
+    if ($NoLaunch) {
+        Write-Step '6/6  Staging the OBS runtime (launch skipped)'
+        & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $runScript -StageOnly
+        if ($LASTEXITCODE -ne 0) { throw 'Staging the OBS runtime failed.' }
+        Write-Host "Build and tests passed. Start the app with RUN_LAST_BUILD.bat." -ForegroundColor Green
+    } else {
+        Write-Step '6/6  Launching Abyss Stream'
+        Write-Host 'Build and tests passed. The application will open now.' -ForegroundColor Green
+        Write-Host ''
+        & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $runScript
+        if ($LASTEXITCODE -ne 0) { throw "Abyss Stream exited with code $LASTEXITCODE." }
+    }
 }
 catch {
     Write-Host ''

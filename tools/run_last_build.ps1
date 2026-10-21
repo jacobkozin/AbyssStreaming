@@ -1,3 +1,8 @@
+param(
+    # Copy the OBS runtime next to the executable without starting it.
+    [switch]$StageOnly
+)
+
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -25,15 +30,19 @@ if (-not $obsDll) { throw 'obs.dll is missing from the cached OBS runtime.' }
 $obsBin = $obsDll.Directory.FullName
 $exeDir = Split-Path $exe -Parent
 
-# Abyss Stream links to obs.dll at process startup, and OBS plugins may depend
-# on sibling runtime DLLs. Stage the exact OBS 32.2.2 bin DLL set beside the
-# executable. The D3D11 graphics module itself is now opened by an ABSOLUTE
-# path inside the application, so this is only dependency staging, not module
-# discovery.
-Get-ChildItem -LiteralPath $obsBin -File -Filter '*.dll' | ForEach-Object {
-    $dest = Join-Path $exeDir $_.Name
-    if (-not (Test-Path -LiteralPath $dest) -or (Get-Item -LiteralPath $dest).Length -ne $_.Length) {
-        Copy-Item -LiteralPath $_.FullName -Destination $dest -Force
+# Stage the exact OBS 32.2.2 runtime beside the executable:
+#  - every DLL in bin\64bit (obs.dll and what OBS plugins link against);
+#  - the helper programs libobs looks for next to the *running* executable:
+#    obs-nvenc-test/obs-amf-test/obs-qsv-test decide whether the GPU encoders
+#    are offered at all, and obs-ffmpeg-mux writes recordings. Without them
+#    NVENC silently falls back to x264 and recording cannot start.
+$helpers = @('obs-nvenc-test.exe', 'obs-amf-test.exe', 'obs-qsv-test.exe', 'obs-ffmpeg-mux.exe')
+$runtimeFiles = @(Get-ChildItem -LiteralPath $obsBin -File -Filter '*.dll') +
+    @($helpers | ForEach-Object { Get-Item -LiteralPath (Join-Path $obsBin $_) -ErrorAction SilentlyContinue } | Where-Object { $_ })
+foreach ($file in $runtimeFiles) {
+    $dest = Join-Path $exeDir $file.Name
+    if (-not (Test-Path -LiteralPath $dest) -or (Get-Item -LiteralPath $dest).Length -ne $file.Length) {
+        Copy-Item -LiteralPath $file.FullName -Destination $dest -Force
     }
 }
 
@@ -50,6 +59,11 @@ foreach ($effect in $requiredEffects) {
     if (-not (Test-Path -LiteralPath (Join-Path $coreData $effect) -PathType Leaf)) {
         throw "OBS core data file is missing: $(Join-Path $coreData $effect)"
     }
+}
+
+if ($StageOnly) {
+    Write-Host "Staged the OBS runtime beside $exe" -ForegroundColor DarkGray
+    exit 0
 }
 
 $env:ABYSS_OBS_RUNTIME = $obsRoot
@@ -73,12 +87,11 @@ if ($qwindows) {
 }
 
 $obsLog = Join-Path $exeDir 'AbyssStream-obs.log'
-if (Test-Path -LiteralPath $obsLog) { Remove-Item -LiteralPath $obsLog -Force -ErrorAction SilentlyContinue }
 
 Write-Host "Launching: $exe" -ForegroundColor Cyan
 Write-Host "OBS runtime: $obsRoot" -ForegroundColor DarkGray
-Write-Host "D3D11 module: $graphicsDll" -ForegroundColor DarkGray
-Write-Host "OBS diagnostic log: $obsLog" -ForegroundColor DarkGray
+Write-Host "Diagnostic log: $obsLog" -ForegroundColor DarkGray
+Write-Host "Settings and scenes: $env:LOCALAPPDATA\Abyss\Abyss Stream" -ForegroundColor DarkGray
 
 $process = Start-Process -FilePath $exe -WorkingDirectory $exeDir -PassThru
 Start-Sleep -Milliseconds 3500
@@ -88,18 +101,15 @@ if ($process.HasExited) {
     if ($exitCode -ne 0) {
         if (Test-Path -LiteralPath $obsLog) {
             Write-Host ''
-            Write-Host "Abyss Stream wrote a detailed OBS log here:" -ForegroundColor Yellow
-            Write-Host $obsLog -ForegroundColor Yellow
-            Write-Host ''
-            Write-Host '================ LAST OBS LOG LINES ================' -ForegroundColor Yellow
-            Get-Content -LiteralPath $obsLog -Tail 120 | ForEach-Object { Write-Host $_ }
-            Write-Host '====================================================' -ForegroundColor Yellow
+            Write-Host '================ LAST LOG LINES ================' -ForegroundColor Yellow
+            Get-Content -LiteralPath $obsLog -Tail 60 | ForEach-Object { Write-Host $_ }
+            Write-Host '================================================' -ForegroundColor Yellow
         }
-        throw "Abyss Stream exited during startup with code $exitCode."
+        throw "Abyss Stream exited during startup with code $exitCode. Full log: $obsLog"
     }
     Write-Host 'Abyss Stream opened and exited normally.' -ForegroundColor Green
 } else {
-    Write-Host "Abyss Stream launched successfully (PID $($process.Id))." -ForegroundColor Green
+    Write-Host "Abyss Stream is running (PID $($process.Id))." -ForegroundColor Green
 }
 
 exit 0
