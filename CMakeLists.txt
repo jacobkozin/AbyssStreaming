@@ -15,13 +15,32 @@ option(ABYSS_BUILD_TESTS "Build core tests" ON)
 set(ABYSS_OBS_INCLUDE_DIR "" CACHE PATH "Path containing obs.h (normally OBS source/libobs)")
 set(ABYSS_OBS_LIBRARY "" CACHE FILEPATH "Path to the Windows obs import library")
 
+if(MSVC)
+    # Sources are UTF-8 (UI strings use typographic dashes); /permissive-
+    # keeps MSVC standards-conformant so CI's GCC build sees the same code.
+    add_compile_options(/utf-8 /permissive- /W3)
+endif()
+
+# --- Core: models, controller, interfaces and mocks. No Qt, no libobs. -------
 add_library(abyss_stream_core STATIC
-    src/core/MultistreamController.cpp
-    src/core/MockStreamBackend.cpp
+    src/core/AppSettings.cpp
+    src/core/AudioBackend.cpp
+    src/core/BitrateMeter.cpp
+    src/core/LogRedactor.cpp
+    src/core/MediaEngine.cpp
+    src/core/MockBackends.cpp
     src/core/MockSceneBackend.cpp
+    src/core/MockStreamBackend.cpp
+    src/core/MultistreamController.cpp
+    src/core/Platforms.cpp
+    src/core/Preflight.cpp
+    src/core/RecordingBackend.cpp
+    src/core/SceneBackend.cpp
+    src/core/SecretStore.cpp
 )
 target_include_directories(abyss_stream_core PUBLIC src)
 
+# --- libobs adapters ----------------------------------------------------------
 if(ABYSS_WITH_OBS)
     if(NOT TARGET OBS::libobs)
         if(ABYSS_OBS_INCLUDE_DIR AND ABYSS_OBS_LIBRARY)
@@ -42,27 +61,46 @@ if(ABYSS_WITH_OBS)
         endif()
     endif()
 
-    target_sources(abyss_stream_core PRIVATE
+    add_library(abyss_stream_obs STATIC
+        src/obs/ObsAudioBackend.cpp
         src/obs/ObsEngine.cpp
-        src/obs/ObsStreamBackend.cpp
+        src/obs/ObsRecordingBackend.cpp
         src/obs/ObsSceneBackend.cpp
+        src/obs/ObsStreamBackend.cpp
     )
-    target_compile_definitions(abyss_stream_core PUBLIC ABYSS_WITH_OBS=1)
-    target_link_libraries(abyss_stream_core PUBLIC OBS::libobs)
+    target_compile_definitions(abyss_stream_obs PUBLIC ABYSS_WITH_OBS=1)
+    target_link_libraries(abyss_stream_obs PUBLIC abyss_stream_core OBS::libobs)
 endif()
 
+# --- Desktop app --------------------------------------------------------------
 if(ABYSS_BUILD_UI)
     find_package(Qt6 6.5 QUIET COMPONENTS Core Gui Widgets)
     if(Qt6_FOUND)
+        # Qt Core services shared by the app and its tests.
+        add_library(abyss_stream_app STATIC
+            src/app/AppPaths.cpp
+            src/app/SettingsStore.cpp
+        )
+        target_link_libraries(abyss_stream_app PUBLIC abyss_stream_core Qt6::Core)
+        if(WIN32)
+            target_sources(abyss_stream_app PRIVATE src/platform/WindowsCredentialStore.cpp)
+            target_link_libraries(abyss_stream_app PUBLIC advapi32)
+        endif()
+
         add_executable(AbyssStream WIN32
             src/main.cpp
+            src/ui/AudioMixerWidget.cpp
+            src/ui/DestinationDialog.cpp
             src/ui/MainWindow.cpp
+            src/ui/SettingsDialog.cpp
+            src/ui/SourceDialog.cpp
+            src/ui/Theme.cpp
         )
         if(ABYSS_WITH_OBS)
             target_sources(AbyssStream PRIVATE src/ui/ObsPreviewWidget.cpp)
+            target_link_libraries(AbyssStream PRIVATE abyss_stream_obs)
         endif()
-        target_include_directories(AbyssStream PRIVATE src)
-        target_link_libraries(AbyssStream PRIVATE abyss_stream_core Qt6::Core Qt6::Gui Qt6::Widgets)
+        target_link_libraries(AbyssStream PRIVATE abyss_stream_app Qt6::Gui Qt6::Widgets)
         set_target_properties(AbyssStream PROPERTIES AUTOMOC ON)
         target_compile_definitions(AbyssStream PRIVATE ABYSS_STREAM_VERSION="${PROJECT_VERSION}")
     else()
@@ -70,12 +108,25 @@ if(ABYSS_BUILD_UI)
     endif()
 endif()
 
+# --- Tests ----------------------------------------------------------------------
 if(ABYSS_BUILD_TESTS)
     enable_testing()
     add_executable(abyss_stream_core_tests
+        tests/test_main.cpp
         tests/test_controller.cpp
+        tests/test_platforms.cpp
         tests/test_scene_backend.cpp
+        tests/test_utilities.cpp
     )
     target_link_libraries(abyss_stream_core_tests PRIVATE abyss_stream_core)
     add_test(NAME abyss_stream_core_tests COMMAND abyss_stream_core_tests)
+
+    if(TARGET abyss_stream_app)
+        add_executable(abyss_stream_app_tests
+            tests/test_main.cpp
+            tests/test_settings_store.cpp
+        )
+        target_link_libraries(abyss_stream_app_tests PRIVATE abyss_stream_app)
+        add_test(NAME abyss_stream_app_tests COMMAND abyss_stream_app_tests)
+    endif()
 endif()

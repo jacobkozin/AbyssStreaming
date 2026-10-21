@@ -1,0 +1,77 @@
+#pragma once
+
+// A deliberately tiny test harness. assert() compiles to nothing in Release
+// builds (NDEBUG), and both CI and BUILD_AND_RUN.bat build Release, so these
+// macros always evaluate their expression and report every failure.
+
+#include <iostream>
+#include <string>
+#include <vector>
+
+namespace abyss::test {
+
+struct TestCase {
+    const char *name;
+    void (*run)();
+};
+
+inline std::vector<TestCase> &registry()
+{
+    static std::vector<TestCase> cases;
+    return cases;
+}
+
+inline int &failureCount()
+{
+    static int failures = 0;
+    return failures;
+}
+
+struct Registrar {
+    Registrar(const char *name, void (*run)()) { registry().push_back({name, run}); }
+};
+
+inline void reportFailure(const char *expression, const char *file, int line)
+{
+    ++failureCount();
+    std::cerr << file << '(' << line << "): CHECK failed: " << expression << '\n';
+}
+
+// Runs every registered test and returns the process exit code.
+inline int runAll()
+{
+    for (const auto &test : registry()) {
+        const int before = failureCount();
+        test.run();
+        std::cout << (failureCount() == before ? "[pass] " : "[FAIL] ") << test.name << '\n';
+    }
+    std::cout << registry().size() << " test(s), " << failureCount() << " failed check(s)\n";
+    return failureCount() == 0 ? 0 : 1;
+}
+
+} // namespace abyss::test
+
+#define ABYSS_TEST_CONCAT_INNER(a, b) a##b
+#define ABYSS_TEST_CONCAT(a, b) ABYSS_TEST_CONCAT_INNER(a, b)
+
+#define TEST_CASE(name)                                                                   \
+    static void ABYSS_TEST_CONCAT(abyssTest_, __LINE__)();                                \
+    static const ::abyss::test::Registrar ABYSS_TEST_CONCAT(abyssTestRegistrar_, __LINE__)( \
+        name, &ABYSS_TEST_CONCAT(abyssTest_, __LINE__));                                  \
+    static void ABYSS_TEST_CONCAT(abyssTest_, __LINE__)()
+
+#define CHECK(expression)                                                         \
+    do {                                                                          \
+        if (!(expression))                                                        \
+            ::abyss::test::reportFailure(#expression, __FILE__, __LINE__);        \
+    } while (false)
+
+// Like CHECK, but stops the current test so later lines cannot dereference
+// something the failed check was guarding.
+#define REQUIRE(expression)                                                       \
+    do {                                                                          \
+        if (!(expression)) {                                                      \
+            ::abyss::test::reportFailure(#expression, __FILE__, __LINE__);        \
+            return;                                                               \
+        }                                                                         \
+    } while (false)

@@ -4,30 +4,29 @@ namespace abyss {
 
 StartResult MockStreamBackend::start(const StreamDestination &destination)
 {
-    if (destination.server.empty())
-        return {false, "RTMP server is empty"};
-    if (destination.streamKey.empty())
-        return {false, "Stream key is empty"};
-    if (destination.server.rfind("rtmp://", 0) != 0 && destination.server.rfind("rtmps://", 0) != 0)
-        return {false, "Server must begin with rtmp:// or rtmps://"};
+    if (destination.server.empty() || destination.streamKey.empty())
+        return {false, "RTMP server/key is missing"};
 
-    outputs_[destination.id] = {.active = true, .message = "Mock connection active"};
+    auto &output = outputs_[destination.id];
+    output = {};
+    output.state = OutputState::Live;
+    output.message = "Mock connection active";
     return {true, {}};
 }
 
 void MockStreamBackend::stop(const std::string &destinationId)
 {
     if (auto it = outputs_.find(destinationId); it != outputs_.end()) {
-        it->second.active = false;
+        it->second.state = OutputState::Offline;
         it->second.message = "Stopped";
     }
 }
 
 void MockStreamBackend::stopAll()
 {
-    for (auto &[_, t] : outputs_) {
-        t.active = false;
-        t.message = "Stopped";
+    for (auto &[_, output] : outputs_) {
+        output.state = OutputState::Offline;
+        output.message = "Stopped";
     }
 }
 
@@ -36,6 +35,15 @@ OutputTelemetry MockStreamBackend::telemetry(const std::string &destinationId) c
     if (auto it = outputs_.find(destinationId); it != outputs_.end())
         return it->second;
     return {};
+}
+
+void MockStreamBackend::simulate(const std::string &destinationId, OutputState state, std::string message)
+{
+    auto &output = outputs_[destinationId];
+    if (state == OutputState::Reconnecting)
+        ++output.reconnectAttempts;
+    output.state = state;
+    output.message = std::move(message);
 }
 
 } // namespace abyss

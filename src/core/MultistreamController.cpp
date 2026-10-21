@@ -1,4 +1,5 @@
 #include "core/MultistreamController.hpp"
+#include "core/Platforms.hpp"
 #include <algorithm>
 #include <stdexcept>
 #include <unordered_set>
@@ -65,19 +66,32 @@ bool MultistreamController::setEnabled(const std::string &id, bool enabled)
     if (!d)
         return false;
     d->enabled = enabled;
-    if (!enabled)
-        backend_->stop(id);
     return true;
+}
+
+StartResult MultistreamController::start(const std::string &id)
+{
+    const auto *d = find(id);
+    if (!d)
+        return {false, "Unknown destination"};
+    if (const auto problem = validateDestination(*d); !problem.empty())
+        return {false, problem};
+    return backend_->start(*d);
+}
+
+void MultistreamController::stop(const std::string &id)
+{
+    backend_->stop(id);
 }
 
 std::vector<DestinationStatus> MultistreamController::startEnabled()
 {
     std::vector<DestinationStatus> results;
     for (const auto &d : destinations_) {
-        if (!d.enabled)
+        if (!d.enabled || isActive(d.id))
             continue;
-        const auto result = backend_->start(d);
-        results.push_back({d.id, d.name, result.ok, result.ok ? "Live" : result.error});
+        const auto result = start(d.id);
+        results.push_back({d.id, d.name, result.ok, result.ok ? "Starting" : result.error});
     }
     return results;
 }
@@ -87,13 +101,14 @@ void MultistreamController::stopAll()
     backend_->stopAll();
 }
 
+bool MultistreamController::isActive(const std::string &id) const
+{
+    return backend_->telemetry(id).active();
+}
+
 bool MultistreamController::anyActive() const
 {
-    for (const auto &d : destinations_) {
-        if (backend_->telemetry(d.id).active)
-            return true;
-    }
-    return false;
+    return std::any_of(destinations_.begin(), destinations_.end(), [&](const auto &d) { return isActive(d.id); });
 }
 
 OutputTelemetry MultistreamController::telemetry(const std::string &id) const
