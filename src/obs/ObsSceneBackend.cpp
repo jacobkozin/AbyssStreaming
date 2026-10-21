@@ -62,6 +62,26 @@ std::uint32_t swapRedBlue(std::uint32_t color)
     return (color & 0xFF00FF00u) | ((color & 0x00FF0000u) >> 16) | ((color & 0x000000FFu) << 16);
 }
 
+const char *colorSpaceName(gs_color_space space)
+{
+    switch (space) {
+    case GS_CS_SRGB: return "SDR";
+    case GS_CS_SRGB_16F: return "SDR (16-bit)";
+    case GS_CS_709_EXTENDED: return "HDR (Rec. 709 extended)";
+    case GS_CS_709_SCRGB: return "HDR (scRGB)";
+    }
+    return "unknown";
+}
+
+const char *displayMethodName(int method)
+{
+    switch (method) {
+    case kDisplayMethodDxgi: return "DXGI";
+    case kDisplayMethodWgc: return "WGC";
+    default: return "automatic";
+    }
+}
+
 void loadedSourceCallback(void *data, obs_source_t *source)
 {
     auto *loaded = static_cast<std::unordered_map<std::string, obs_scene_t *> *>(data);
@@ -568,8 +588,8 @@ SceneOperationResult ObsSceneBackend::autoTuneDisplayCapture(const std::string &
     // Pass 1 is diagnostic: WGC is already the HDR-aware default, so log what
     // OBS reports to confirm the native capture path was kept.
     if (pass <= 1) {
-        blog(LOG_INFO, "Abyss HDR-aware display check: %s size=%ux%u colorspace=%d method=%d force_sdr=false",
-             name.c_str(), width, height, static_cast<int>(sourceSpace), method);
+        blog(LOG_INFO, "Abyss HDR-aware display check: %s size=%ux%u color=%s method=%s force_sdr=false",
+             name.c_str(), width, height, colorSpaceName(sourceSpace), displayMethodName(method));
         obs_data_release(settings);
         return {true, {}, name};
     }
@@ -835,6 +855,9 @@ bool ObsSceneBackend::loadState(const std::string &json, std::string &error)
         releaseAll();
         return false;
     }
+    // Re-apply each item's layout preset, so placements follow the current
+    // canvas size and preset rules even if an older build saved the file.
+    setCanvasSize(baseWidth_, baseHeight_);
     return true;
 }
 

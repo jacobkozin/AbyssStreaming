@@ -1,8 +1,9 @@
 # Changelog
 
-## Unreleased (working towards 1.0.0)
+## 1.0.0 — 2026-10-20
 
 ### Added
+- Abyss's own RTMP/RTMPS client (`src/net`), opt-in under Settings > Advanced. It covers AMF0, FLV tags, the RTMP handshake and chunking, Winsock TCP and Schannel TLS. It is registered with libobs as `abyss_rtmp_output`, so it shares the encoder, reconnects and telemetry with OBS's output. The end-to-end test runs with both.
 - Audio mixer: desktop audio and microphone with device selection, volume, mute and live level meters.
 - Local recording to MKV or MP4 (fragmented) that reuses the stream encoder.
 - Per-destination Start/Stop alongside Go Live / Stop All, with connecting/live/reconnecting/error status, uptime, bitrate and dropped frames.
@@ -25,7 +26,7 @@
 - The display capture method numbers were swapped (win-capture uses 1 for DXGI and 2 for WGC). So "Abyss Auto" started with DXGI instead of Windows Graphics Capture, and choosing WGC or DXGI by hand gave the other one. The values are now defined once in `core/SceneBackend.hpp`.
 - The HDR check on a new display capture read its color space outside the graphics context, so it always reported SDR.
 - Unchecked check boxes were invisible on the dark theme, including each destination's "include in Go Live" box.
-- The corner layouts (top left and so on) scaled a source up to fill a box nearly the size of the canvas, so a line of text became huge. Corners now keep a source's own size and only shrink it to fit, and the Size menu reads "Max size" there.
+- The corner layouts (top left and so on) scaled a source up to fill a box nearly the size of the canvas, so a line of text became huge. Corners now keep a source's own size and only shrink it to fit, and the Size menu reads "Max size" there. Layout presets are re-applied when scenes load, so a scene saved by an older build picks up the new rules.
 
 ## 0.3.0 R9 — 2026-09-29
 

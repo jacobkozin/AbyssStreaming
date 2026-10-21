@@ -14,7 +14,8 @@ It is written in C++20 with Qt 6 and uses [libobs](https://github.com/obsproject
 - **Live status per destination:** connecting, live (with uptime), reconnecting, or error in plain language, plus bitrate and dropped frames. Dropped connections reconnect automatically (up to 20 attempts with back-off).
 - **Pre-flight check** before going live: missing keys, malformed URLs, or a bitrate above what a platform accepts (for example Twitch's 6000 kbps).
 - **Scenes and sources** with a live preview: display, window and game capture, webcam/capture card, image, text and color sources. Show/hide, reorder, edit, and quick layouts (fit, stretch, center, corners, size).
-- **HDR-aware display capture.** Captures an HDR monitor correctly without turning Windows HDR off (Windows Graphics Capture first, automatic fallback to DXGI).
+- **HDR-aware display capture.** Captures an HDR monitor correctly without turning Windows HDR off (Windows Graphics Capture first, automatic fallback to DXGI). It uses the SDR brightness you set in Windows, so the preview and the captured desktop look the way they do on your screen.
+- **Abyss's own RTMP/RTMPS client (opt-in).** A from-scratch RTMP publisher (Winsock, TLS through Windows Schannel) can replace OBS's network output: Settings > Advanced. It is the first step towards not depending on OBS at all.
 - **Audio mixer:** desktop audio and microphone with device selection, volume faders, mute and live level meters.
 - **Local recording** to MKV or MP4, alone or while live, reusing the stream encoder.
 - **Stream keys stay secret.** They are stored in Windows Credential Manager, never in Abyss Stream's settings files, and masked out of every log line.
@@ -76,7 +77,8 @@ ctest --test-dir build/core -C Release --output-on-failure
 # Full build including the Qt settings tests: BUILD_AND_RUN.bat --no-launch
 
 # End-to-end: one shared encode to two local RTMP servers plus a recording,
-# with one server dropping the connection to test auto-reconnect
+# with one server dropping the connection to test auto-reconnect. Runs once
+# with OBS's RTMP output and once with Abyss's own RTMP client.
 powershell -ExecutionPolicy Bypass -File tools/run_e2e_test.ps1
 
 # The RTMP test server checks itself against a built-in publisher
@@ -96,6 +98,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). The short version: the UI and 
 - Streams and records in SDR (Rec. 709). HDR monitors are captured correctly, but there is no HDR output yet.
 - No replay buffer, no installer, no auto-update. Builds are unsigned, so some antivirus products block a freshly built `AbyssStream.exe` until you allow it.
 - Kick's ingest URL is per-account, so it has to be pasted from the Kick dashboard.
+- Abyss's own RTMP client is opt-in while it gets more real-world use; OBS's RTMP output is the default.
 - Tested end to end against local RTMP servers. Live sessions on real Twitch, YouTube and Kick accounts need the owner's keys and are verified by hand.
 
 ## Roadmap
@@ -106,9 +109,10 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). The short version: the UI and 
 
 ```text
 src/core/      Models, rules and interfaces (plain C++20; no Qt or OBS)
+src/net/       Abyss's RTMP/RTMPS publisher (plain C++20; no Qt or OBS)
 src/obs/       libobs adapters: engine, streaming, scenes, audio, recording
 src/app/       Settings files and paths (Qt Core)
-src/platform/  Windows Credential Manager and crash dumps
+src/platform/  Windows Credential Manager, crash dumps, HDR monitor brightness
 src/ui/        Qt Widgets user interface
 tests/         Unit tests, Qt settings tests, end-to-end pipeline test
 tools/         Build/run scripts, local RTMP test server, end-to-end runner
