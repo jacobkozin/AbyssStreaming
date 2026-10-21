@@ -85,7 +85,7 @@ std::string validateDestination(const StreamDestination &destination)
 
     if (presetFor(destination.platform).requiresRtmps && !rtmps)
         return destination.name + ": " + std::string(presetFor(destination.platform).displayName) +
-               " only accepts secure rtmps:// URLs.";
+               " stream URLs start with rtmps://. Copy it exactly from your dashboard.";
 
     if (destination.streamKey.empty())
         return destination.name + ": enter the stream key.";

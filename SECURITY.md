@@ -2,14 +2,19 @@
 
 ## Supported versions
 
-Abyss Stream is pre-release software. Security fixes are applied to the latest code on the default branch; no stable release line is currently supported.
+Security fixes go to the latest code on the default branch. There are no maintained release branches.
 
 ## Reporting a vulnerability
 
-Use GitHub's private vulnerability-reporting feature if it is available for this repository. If it is not available, open a minimal issue requesting a private contact channel without including exploit details, credentials, logs, or other sensitive material.
+Use GitHub's private vulnerability reporting if it is enabled for this repository. Otherwise, open a minimal issue asking for a private contact channel, without exploit details, credentials or logs.
 
-Never submit real Twitch, YouTube, Kick, or custom RTMP stream keys. Revoke and rotate a key immediately if it is exposed anywhere public.
+Never post real Twitch, YouTube, Kick or other RTMP stream keys anywhere. If a key is exposed, reset it in the platform's dashboard right away.
 
-## Credential handling
+## How stream keys are handled
 
-The current prototype keeps stream keys in process memory and does not intentionally persist them. Persistent credential storage is not implemented yet and must use an operating-system-backed secret store such as Windows Credential Manager or DPAPI—not a plaintext configuration file.
+- Keys are typed into a masked field and stored in **Windows Credential Manager** as generic credentials named `AbyssStream/stream-key/<destination-id>`. Windows encrypts them with the signed-in user's credentials. You can view or delete them in Control Panel > Credential Manager > Windows Credentials.
+- `settings.json` never contains a key; a unit test enforces that. Removing a destination in the app also deletes its stored key.
+- Every line written to `AbyssStream-obs.log` passes through a redactor that masks all known keys, including a key pasted into a server URL or echoed back by a server. Error messages shown in the app are masked the same way.
+- Abyss Stream sends nothing anywhere except to the RTMP servers you configure. No telemetry, no account, no relay.
+
+Crash dumps (`AbyssStream-crash-*.dmp`) contain process memory, which can include a key that was in use. Treat them as private and share them only with someone you trust.

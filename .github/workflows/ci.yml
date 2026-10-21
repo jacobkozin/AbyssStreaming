@@ -33,3 +33,11 @@ jobs:
 
       - name: Test
         run: ctest --test-dir build/core -C Release --output-on-failure
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: RTMP test server self-test
+        run: python tools/rtmp_test_server.py --self-test

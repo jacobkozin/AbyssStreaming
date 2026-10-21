@@ -1,12 +1,12 @@
 # Contributing
 
-Thanks for helping improve Abyss Stream. The project is an early Windows prototype, so small, testable changes are especially valuable.
+Thanks for helping improve Abyss Stream. Small, tested changes are the easiest to review.
 
 ## Before opening a change
 
-1. Do not commit stream keys, account identifiers, OBS logs, crash dumps, downloaded dependencies, or build output.
-2. Keep the core layer independent of Qt and libobs when practical.
-3. Run the core test configuration:
+1. Never commit stream keys, account identifiers, logs, crash dumps, downloaded dependencies or build output.
+2. Keep `src/core` free of Qt and libobs, and keep the UI talking to the core interfaces rather than libobs. That is what keeps the code testable and the engine replaceable.
+3. Run the unit tests:
 
    ```powershell
    cmake -S . -B build/core -DABYSS_BUILD_UI=OFF -DABYSS_WITH_OBS=OFF -DABYSS_BUILD_TESTS=ON
@@ -14,14 +14,14 @@ Thanks for helping improve Abyss Stream. The project is an early Windows prototy
    ctest --test-dir build/core -C Release --output-on-failure
    ```
 
-4. For capture, encoding, or runtime-loading changes, also run `BUILD_AND_RUN.bat` on Windows and describe the hardware/runtime used.
+4. For changes to capture, encoding, streaming or recording, also run `BUILD_AND_RUN.bat --no-launch` and `tools\run_e2e_test.ps1` on Windows, and say which GPU you tested on.
 
 ## Pull requests
 
 - Explain the user-facing problem and the chosen approach.
 - Keep unrelated formatting or refactors out of the same change.
-- Add or update tests for controller and scene-model behavior.
-- Document manual validation when automated coverage is not possible.
-- Scrub usernames, paths, server addresses, and credentials from attached logs.
+- Add or update tests for controller, validation, settings and scene-model behavior. Use the `TEST_CASE`/`CHECK` macros in `tests/TestHarness.hpp`, not `assert()` (asserts vanish in Release builds).
+- Describe manual testing where automated coverage is not possible.
+- Scrub usernames, paths, server addresses and credentials from attached logs.
 
-Bug reports are useful, but public issues must never contain a real stream key or other account secret.
+Bug reports are welcome, but public issues must never contain a real stream key or other account secret.

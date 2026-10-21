@@ -616,19 +616,29 @@ async def run_self_test() -> int:
         def command(*values, stream: int = 0) -> bytes:
             return message(3, COMMAND_AMF0, b"".join(amf_encode(v) for v in values), stream)
 
-        writer.write(command("connect", 1, {"app": "live", "type": "nonprivate"}))
-        writer.write(command("createStream", 2, None))
-        writer.write(command("publish", 3, None, stream_key, "live", stream=1))
-        sps = synthetic_sps(1920, 1080)
-        avc_config = bytes([1, 100, 0, 42, 0xFF, 0xE1]) + struct.pack(">H", len(sps)) + sps + b"\x01\x00\x04\x68\xEE\x3C\x80"
-        writer.write(message(6, VIDEO, b"\x17\x00\x00\x00\x00" + avc_config, 1))
-        writer.write(message(4, AUDIO, b"\xAF\x00" + bytes([0x11, 0x90]), 1))  # AAC-LC, 48 kHz, stereo
-        for i in range(30):
-            frame_type = 0x17 if i % 10 == 0 else 0x27
-            writer.write(message(6, VIDEO, bytes([frame_type, 1, 0, 0, 0]) + b"\x00" * 400, 1, ts=i * 33))
-            writer.write(message(4, AUDIO, b"\xAF\x01" + b"\x00" * 50, 1, ts=i * 21))
-        await writer.drain()
-        writer.close()
+        try:
+            writer.write(command("connect", 1, {"app": "live", "type": "nonprivate"}))
+            writer.write(command("createStream", 2, None))
+            writer.write(command("publish", 3, None, stream_key, "live", stream=1))
+            sps = synthetic_sps(1920, 1080)
+            avc_config = bytes([1, 100, 0, 42, 0xFF, 0xE1]) + struct.pack(">H", len(sps)) + sps
+            avc_config += b"\x01\x00\x04\x68\xEE\x3C\x80"  # one PPS
+            writer.write(message(6, VIDEO, b"\x17\x00\x00\x00\x00" + avc_config, 1))
+            writer.write(message(4, AUDIO, b"\xAF\x00" + bytes([0x11, 0x90]), 1))  # AAC-LC, 48 kHz, stereo
+            for i in range(30):
+                frame_type = 0x17 if i % 10 == 0 else 0x27
+                writer.write(message(6, VIDEO, bytes([frame_type, 1, 0, 0, 0]) + b"\x00" * 400, 1, ts=i * 33))
+                writer.write(message(4, AUDIO, b"\xAF\x01" + b"\x00" * 50, 1, ts=i * 21))
+            await writer.drain()
+            # Half-close and read the server's replies before closing. Closing
+            # with unread data makes the kernel send a reset, which can discard
+            # data the server has not read yet.
+            writer.write_eof()
+            await reader.read()
+        except (ConnectionError, asyncio.IncompleteReadError):
+            pass  # the server hangs up on a rejected key
+        finally:
+            writer.close()
 
     await publish(key)
     await publish("wrong-key")

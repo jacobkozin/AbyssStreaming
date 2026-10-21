@@ -27,3 +27,4 @@ CMakeLists.txt text eol=lf
 *.zip binary
 *.exe binary
 *.dll binary
+*.py text eol=lf
