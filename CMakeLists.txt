@@ -70,6 +70,13 @@ if(ABYSS_WITH_OBS)
     )
     target_compile_definitions(abyss_stream_obs PUBLIC ABYSS_WITH_OBS=1)
     target_link_libraries(abyss_stream_obs PUBLIC abyss_stream_core OBS::libobs)
+
+    # Headless end-to-end test of the real pipeline. Not part of ctest: it
+    # needs the OBS runtime and local RTMP servers (tools/run_e2e_test.ps1).
+    if(ABYSS_BUILD_TESTS)
+        add_executable(abyss_stream_e2e tests/e2e/pipeline_e2e.cpp)
+        target_link_libraries(abyss_stream_e2e PRIVATE abyss_stream_obs)
+    endif()
 endif()
 
 # --- Desktop app --------------------------------------------------------------
