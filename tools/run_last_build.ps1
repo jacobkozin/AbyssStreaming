@@ -46,6 +46,23 @@ foreach ($file in $runtimeFiles) {
     }
 }
 
+# Qt's platform/style plugins and a pointer to the OBS runtime let
+# AbyssStream.exe also start with a plain double-click, without this script.
+foreach ($pluginDir in 'platforms', 'styles', 'imageformats', 'iconengines') {
+    $source = Join-Path $obsBin $pluginDir
+    if (Test-Path -LiteralPath $source) {
+        $dest = Join-Path $exeDir $pluginDir
+        New-Item -ItemType Directory -Force -Path $dest | Out-Null
+        Get-ChildItem -LiteralPath $source -File | ForEach-Object {
+            $target = Join-Path $dest $_.Name
+            if (-not (Test-Path -LiteralPath $target) -or (Get-Item -LiteralPath $target).Length -ne $_.Length) {
+                Copy-Item -LiteralPath $_.FullName -Destination $target -Force
+            }
+        }
+    }
+}
+Set-Content -LiteralPath (Join-Path $exeDir 'obs-runtime.txt') -Value $obsRoot -Encoding UTF8
+
 $graphicsDll = Join-Path $obsBin 'libobs-d3d11.dll'
 if (-not (Test-Path -LiteralPath $graphicsDll -PathType Leaf)) {
     throw "libobs-d3d11.dll is missing from the official OBS runtime: $graphicsDll"

@@ -93,7 +93,6 @@ MainWindow::MainWindow(AppServices services, AppSettings settings, QWidget *pare
       controller_(services_.stream)
 {
     setWindowTitle(QString("Abyss Stream %1").arg(ABYSS_STREAM_VERSION));
-    setStyleSheet(theme::styleSheet());
     resize(1500, 900);
 
     auto *root = new QWidget(this);
@@ -586,7 +585,12 @@ void MainWindow::loadDestinations()
 void MainWindow::rebuildDestinations()
 {
     while (auto *item = destinationsLayout_->takeAt(0)) {
-        delete item->widget();
+        if (QWidget *widget = item->widget()) {
+            // deleteLater: the row may hold the Edit/Remove button whose
+            // clicked() signal is still being handled.
+            widget->hide();
+            widget->deleteLater();
+        }
         delete item;
     }
     rows_.clear();

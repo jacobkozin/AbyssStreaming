@@ -10,6 +10,7 @@
 #include "platform/CrashHandler.hpp"
 #include "ui/MainWindow.hpp"
 #include "ui/ObsPreviewWidget.hpp"
+#include "ui/Theme.hpp"
 
 #ifdef ABYSS_WITH_OBS
 #include "obs/ObsAudioBackend.hpp"
@@ -26,6 +27,7 @@
 #include <QApplication>
 #include <QCoreApplication>
 #include <QDir>
+#include <QFile>
 #include <QLockFile>
 #include <QMessageBox>
 #include <QMetaObject>
@@ -63,9 +65,15 @@ void uiTaskHandler(obs_task_t task, void *param, bool wait)
 abyss::ObsEngineConfig engineConfig(const abyss::AppSettings &settings, const QString &dataDirectory)
 {
     const QString appDir = QCoreApplication::applicationDirPath();
+    // 1) the launcher's environment variable, 2) obs-runtime.txt written next
+    // to the exe when the build was staged, 3) an exe living in <root>/bin/64bit.
     QString runtimeRoot = qEnvironmentVariable("ABYSS_OBS_RUNTIME");
     if (runtimeRoot.isEmpty()) {
-        // Deployed beside OBS, AbyssStream.exe lives in <root>/bin/64bit.
+        QFile pointer(QDir(appDir).filePath("obs-runtime.txt"));
+        if (pointer.open(QIODevice::ReadOnly | QIODevice::Text))
+            runtimeRoot = QString::fromUtf8(pointer.readAll()).trimmed().remove(QChar(0xFEFF));
+    }
+    if (runtimeRoot.isEmpty()) {
         QDir probe(appDir);
         if (probe.cdUp() && probe.cdUp())
             runtimeRoot = probe.absolutePath();
@@ -100,6 +108,7 @@ int main(int argc, char **argv)
     QApplication::setOrganizationName("Abyss");
     QApplication::setApplicationName("Abyss Stream");
     QApplication::setApplicationVersion(ABYSS_STREAM_VERSION);
+    abyss::theme::apply(app);
 
     const QString dataDirectory = abyss::appDataDirectory();
     QDir().mkpath(dataDirectory);
